@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MIT
+
+# The first job of a project's release workflow: read the version in CMakeLists.txt's project(), check that a tag
+# matches it (vX.Y.Z), and require the release notes in docs/release-notes/X.Y.Z.md. The action stops the release with
+# an error if one of them is wrong. A workflow checks the project out, then uses the action by its path in the
+# checkout:
+# uses: ./externals/xsflib/ci/release-version
+name: Release version
+description: Read the project's version, and check the tag and the release notes against it
+inputs:
+  project:
+    description: The project's name in CMakeLists.txt's project()
+    required: true
+outputs:
+  version:
+    description: The project's version, X.Y.Z
+    value: ${{ steps.version.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: version
+      name: Read the version
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project }}
+      run: |
+        version=$(sed -n "s/^project($PROJECT VERSION \([0-9][0-9.]*\) .*/\1/p" CMakeLists.txt)
+        if [ -z "$version" ]; then
+          echo "::error::no version in CMakeLists.txt's project()"
+          exit 1
+        fi
+        if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+          echo "::error::the tag is $GITHUB_REF_NAME, but CMakeLists.txt says $version (tag v$version)"
+          exit 1
+        fi
+        if [ ! -f "docs/release-notes/$version.md" ]; then
+          echo "::error::docs/release-notes/$version.md is missing"
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"

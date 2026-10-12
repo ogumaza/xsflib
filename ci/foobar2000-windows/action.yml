@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: MIT
+
+# The Windows job of a player's foobar2000 component workflow: build the component for 64-bit and 32-bit foobar2000
+# with clang-cl, and upload the DLLs as the artifact windows: the 32-bit one at the top level and the 64-bit one in
+# x64/. The foobar2000 SDK comes from ../foobar2000-sdk. The action runs on a Windows runner, after the checkout:
+# uses: ./externals/xsflib/ci/foobar2000-windows
+name: foobar2000 component on Windows
+description: Build the foobar2000 component's 64-bit and 32-bit DLLs and upload them
+inputs:
+  component:
+    description: The component's target, such as foo_input_xyz
+    required: true
+  foobar2000-version:
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
+  foobar2000-sha256:
+    description: The SHA-256 of that SDK's archive
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download the foobar2000 SDK
+      if: inputs.foobar2000-version == ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+    - name: Download the project's foobar2000 SDK
+      if: inputs.foobar2000-version != ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+      with:
+        version: ${{ inputs.foobar2000-version }}
+        sha256: ${{ inputs.foobar2000-sha256 }}
+    - name: Build (x64)
+      shell: pwsh
+      run: |
+        cmake -S . -B build-x64 -A x64 -T ClangCL -DFOOBAR2000_SDK_DIR="${{ github.workspace }}/sdk"
+        cmake --build build-x64 --config Release --target ${{ inputs.component }}
+    - name: Build (Win32)
+      shell: pwsh
+      run: |
+        cmake -S . -B build-win32 -A Win32 -T ClangCL -DFOOBAR2000_SDK_DIR="${{ github.workspace }}/sdk"
+        cmake --build build-win32 --config Release --target ${{ inputs.component }}
+    - name: Collect the DLLs
+      shell: pwsh
+      env:
+        COMPONENT: ${{ inputs.component }}
+      run: |
+        New-Item -ItemType Directory -Force pkg/x64 | Out-Null
+        Copy-Item "build-win32/plugins/foobar2000/Release/$env:COMPONENT.dll" pkg/
+        Copy-Item "build-x64/plugins/foobar2000/Release/$env:COMPONENT.dll" pkg/x64/
+    - uses: actions/upload-artifact@v7
+      with:
+        name: windows
+        path: pkg/

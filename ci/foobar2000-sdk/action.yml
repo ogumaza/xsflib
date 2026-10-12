@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MIT
+
+# Downloads the foobar2000 SDK from foobar2000.org, checks its SHA-256 and unpacks it into sdk/ in the workspace. A
+# project's foobar2000 component builds against it. The SDK isn't stored in xsflib or in the projects that use it. The
+# version is pinned so that a new SDK can't break CI without warning. A project that requires another SDK passes its
+# version and SHA-256 as inputs. To move to a newer SDK, change the defaults below and check that the components still
+# build. The action runs on Windows and macOS runners. 7-Zip unpacks the SDK on Windows. On macOS, tar unpacks it
+# (bsdtar reads 7z archives). A workflow uses the action by its path in the project's checkout:
+# uses: ./externals/xsflib/ci/foobar2000-sdk
+name: foobar2000 SDK
+description: Download the foobar2000 SDK and unpack it into sdk/
+inputs:
+  version:
+    description: The SDK's version, the date in its file name
+    required: false
+    default: "2026-10-01"
+  sha256:
+    description: The SHA-256 of the SDK's archive
+    required: false
+    default: d4c55077336fae81bf8df0259b5b2748fa45ea84132c656ead93eb123cbcdc26
+runs:
+  using: composite
+  steps:
+    - name: Download the foobar2000 SDK
+      shell: pwsh
+      env:
+        SDK_VERSION: ${{ inputs.version }}
+        SDK_SHA256: ${{ inputs.sha256 }}
+      run: |
+        $url = "https://www.foobar2000.org/downloads/SDK-$env:SDK_VERSION.7z"
+        Write-Host "SDK: $url"
+        Invoke-WebRequest -UseBasicParsing $url -OutFile sdk.7z
+        $hash = (Get-FileHash -Algorithm SHA256 sdk.7z).Hash.ToLowerInvariant()
+        if ($hash -ne $env:SDK_SHA256) { throw "the SDK's SHA-256 is $hash, not $env:SDK_SHA256" }
+        if ($IsWindows) {
+          7z x sdk.7z -osdk | Out-Null
+        } else {
+          New-Item -ItemType Directory -Force sdk | Out-Null
+          tar -xf sdk.7z -C sdk
+        }

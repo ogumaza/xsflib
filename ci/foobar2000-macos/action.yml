@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: MIT
+
+# The macOS job of a player's foobar2000 component workflow: build the component for foobar2000 on macOS (Apple Silicon),
+# add the Windows job's DLLs (../foobar2000-windows), and upload one <component>.fb2k-component: the 32-bit
+# DLL at the top level, the 64-bit DLL in x64/, the Mac bundle in mac/ and the licences. This job puts the package
+# together because zip keeps the bundle's file permissions. An artifact would lose them. The action runs on a macOS
+# runner, after the checkout:
+# uses: ./externals/xsflib/ci/foobar2000-macos
+name: foobar2000 component on macOS
+description: Build the foobar2000 component for macOS and package it with the Windows DLLs
+inputs:
+  component:
+    description: The component's target, such as foo_input_xyz
+    required: true
+  foobar2000-version:
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
+  foobar2000-sha256:
+    description: The SHA-256 of that SDK's archive
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download the foobar2000 SDK
+      if: inputs.foobar2000-version == ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+    - name: Download the project's foobar2000 SDK
+      if: inputs.foobar2000-version != ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+      with:
+        version: ${{ inputs.foobar2000-version }}
+        sha256: ${{ inputs.foobar2000-sha256 }}
+    - name: Build (Apple Silicon)
+      shell: bash
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFOOBAR2000_SDK_DIR="${{ github.workspace }}/sdk" \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+        cmake --build build --target ${{ inputs.component }} --parallel
+    - uses: actions/download-artifact@v8
+      with:
+        name: windows
+        path: pkg
+    - name: Package
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+      run: |
+        mkdir -p pkg/mac
+        cp -R "build/plugins/foobar2000/$COMPONENT.component" pkg/mac/
+        cp LICENSE THIRD-PARTY-NOTICES.md pkg/
+        cd pkg && zip -q -r "../$COMPONENT.fb2k-component" .
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.component }}
+        path: ${{ inputs.component }}.fb2k-component

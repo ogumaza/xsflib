@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: MIT
+
+# The end of a project's release workflow: a pushed tag publishes the files in dist/ as a GitHub release, with the
+# notes in docs/release-notes/X.Y.Z.md. A run started by hand uploads them as an artifact instead, even from a tag. The
+# job requires the contents: write permission. The action runs after the packaging:
+# uses: ./externals/xsflib/ci/release-publish
+name: Publish a release
+description: Publish dist/ as a release for a pushed tag, or upload it as an artifact for a run started by hand
+inputs:
+  title:
+    description: The project's name in the release's title, such as xyz2midi or xyz
+    required: true
+  version:
+    description: The project's version, X.Y.Z (../release-version)
+    required: true
+  artifact:
+    description: The name of the artifact that a run started by hand uploads
+    required: true
+runs:
+  using: composite
+  steps:
+    # Only a pushed tag publishes.
+    - name: Publish the release
+      if: github.event_name == 'push' && github.ref_type == 'tag'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TITLE: ${{ inputs.title }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$TITLE $VERSION" \
+          --notes-file "docs/release-notes/$VERSION.md"
+    - name: Upload the files from a run started by hand
+      if: github.event_name != 'push' || github.ref_type != 'tag'
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact }}
+        path: dist/

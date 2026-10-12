@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+
+# The packaging of a player's release: download the Windows jobs' artifacts (win-x64 and win32) and make three
+# downloads in dist/: <format>-X.Y.Z-win-x64.zip and <format>-X.Y.Z-win32.zip with the programs, README.md and the
+# licences, and <component>-X.Y.Z.fb2k-component for 64-bit and 32-bit foobar2000, with the 32-bit DLL at the top level
+# and the 64-bit one in x64/. zip, run on Linux, writes the names with forward slashes. foobar2000 requires those in a
+# component. The action runs on a Linux runner, after the checkout:
+# uses: ./externals/xsflib/ci/package-player
+name: Package a player
+description: Zip the player's Windows programs and its foobar2000 component into dist/
+inputs:
+  format:
+    description: The format's name in the downloads' names, such as xyz
+    required: true
+  version:
+    description: The project's version, X.Y.Z (../release-version)
+    required: true
+  programs:
+    description: The programs, separated by spaces, such as "xyzrip xyzplay"
+    required: true
+  component:
+    description: The foobar2000 component's name, such as foo_input_xyz
+    required: true
+  xsflib-license:
+    description: "'true' to add xsflib's LICENSE to each download, as LICENSE-xsflib.txt"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        path: artifacts
+    - name: Package
+      shell: bash
+      env:
+        FORMAT: ${{ inputs.format }}
+        VERSION: ${{ inputs.version }}
+        PROGRAMS: ${{ inputs.programs }}
+        COMPONENT: ${{ inputs.component }}
+        XSFLIB_LICENSE: ${{ inputs.xsflib-license }}
+      run: |
+        mkdir -p dist
+        for package in win-x64 win32; do
+          mkdir -p "stage/$package"
+          for program in $PROGRAMS; do
+            cp "artifacts/$package/$program.exe" "stage/$package/"
+          done
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md "stage/$package/"
+          if [ "$XSFLIB_LICENSE" = true ]; then
+            cp externals/xsflib/LICENSE "stage/$package/LICENSE-xsflib.txt"
+          fi
+          (cd "stage/$package" && zip -q -X "../../dist/$FORMAT-$VERSION-$package.zip" *)
+        done
+        mkdir -p stage/component/x64
+        cp "artifacts/win32/$COMPONENT.dll" stage/component/
+        cp "artifacts/win-x64/$COMPONENT.dll" stage/component/x64/
+        cp LICENSE THIRD-PARTY-NOTICES.md stage/component/
+        if [ "$XSFLIB_LICENSE" = true ]; then
+          cp externals/xsflib/LICENSE stage/component/LICENSE-xsflib.txt
+        fi
+        (cd stage/component && zip -q -X -r "../../dist/$COMPONENT-$VERSION.fb2k-component" .)
+        for file in dist/*; do
+          echo "$file:"
+          unzip -l "$file"
+        done

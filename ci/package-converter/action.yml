@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+
+# The packaging of a converter's release: download the Windows job's artifact (win-x64) and zip the program with the
+# project's documents into dist/<program>-X.Y.Z-win-x64.zip. The action runs on a Linux runner, after the checkout:
+# uses: ./externals/xsflib/ci/package-converter
+name: Package a converter
+description: Zip the converter's Windows program with its documents into dist/
+inputs:
+  program:
+    description: The program's name, such as xyz2midi
+    required: true
+  version:
+    description: The project's version, X.Y.Z (../release-version)
+    required: true
+  documents:
+    description: The project's files that go into the zip with the program, separated by spaces
+    required: false
+    default: README.md LICENSE THIRD-PARTY-NOTICES.md
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: win-x64
+        path: artifacts/win-x64
+    - name: Package
+      shell: bash
+      env:
+        PROGRAM: ${{ inputs.program }}
+        VERSION: ${{ inputs.version }}
+        DOCUMENTS: ${{ inputs.documents }}
+      run: |
+        mkdir -p dist stage
+        read -ra documents <<< "$DOCUMENTS"
+        cp "artifacts/win-x64/$PROGRAM.exe" "${documents[@]}" stage/
+        (cd stage && zip -q -X "../dist/$PROGRAM-$VERSION-win-x64.zip" *)
+        unzip -l "dist/$PROGRAM-$VERSION-win-x64.zip"

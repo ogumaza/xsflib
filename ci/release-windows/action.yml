@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: MIT
+
+# The Windows job of a project's release workflow: build the release's targets, check that each program reports the
+# version and that each file contains it in the version resource that Windows shows in its properties, and upload the
+# files as an artifact for the packaging job. With foobar2000 set, the job first downloads the foobar2000 SDK
+# (../foobar2000-sdk). The action runs on a Windows runner, after the checkout:
+# uses: ./externals/xsflib/ci/release-windows
+name: Release on Windows
+description: Build the release's Windows files, check their versions and upload them
+inputs:
+  version:
+    description: The project's version, X.Y.Z (../release-version)
+    required: true
+  cmake:
+    description: More options for CMake's configure step, such as the generator's platform and toolset
+    required: false
+    default: ""
+  targets:
+    description: The targets to build, separated by spaces
+    required: true
+  programs:
+    description: The programs whose --version must give "<program> X.Y.Z", separated by spaces (build/Release/<program>.exe)
+    required: true
+  files:
+    description: The files to check for the version resource and to upload, separated by spaces
+    required: true
+  artifact:
+    description: The name of the artifact that holds the files
+    required: true
+  foobar2000:
+    description: "'true' to download the foobar2000 SDK first, into sdk/"
+    required: false
+    default: "false"
+  foobar2000-version:
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
+  foobar2000-sha256:
+    description: The SHA-256 of that SDK's archive
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download the foobar2000 SDK
+      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version == ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+    - name: Download the project's foobar2000 SDK
+      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version != ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+      with:
+        version: ${{ inputs.foobar2000-version }}
+        sha256: ${{ inputs.foobar2000-sha256 }}
+    - name: Build
+      shell: pwsh
+      run: |
+        cmake -S . -B build ${{ inputs.cmake }}
+        cmake --build build --config Release --parallel --target ${{ inputs.targets }}
+    # Each program reports the version. Windows shows it in the file's properties.
+    - name: Check the version
+      shell: pwsh
+      env:
+        VERSION: ${{ inputs.version }}
+        PROGRAMS: ${{ inputs.programs }}
+        FILES: ${{ inputs.files }}
+      run: |
+        $version = $env:VERSION
+        foreach ($tool in -split $env:PROGRAMS) {
+          $said = (& "build/Release/$tool.exe" --version) -join ''
+          if ($said -ne "$tool $version") { throw "$tool --version says '$said', not '$tool $version'" }
+        }
+        foreach ($file in -split $env:FILES) {
+          $info = (Get-Item $file).VersionInfo
+          if ($info.ProductVersion -ne $version -or $info.FileVersion -ne $version) {
+            throw "$file has version '$($info.FileVersion)' / '$($info.ProductVersion)', not $version"
+          }
+        }
+    - name: Collect
+      shell: pwsh
+      env:
+        FILES: ${{ inputs.files }}
+      run: |
+        New-Item -ItemType Directory -Force out | Out-Null
+        foreach ($file in -split $env:FILES) { Copy-Item $file out/ }
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact }}
+        path: out/

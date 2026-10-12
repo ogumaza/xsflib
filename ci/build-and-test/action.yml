@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: MIT
+
+# The steps of a project's CI job after the checkout: configure in build/, build the Release configuration, run ctest,
+# and upload a file of the build if the job names one. With foobar2000 set, the job first downloads the foobar2000 SDK
+# (../foobar2000-sdk) and builds the project's component against it. With msys2 set, the commands run in the MSYS2
+# shell that msys2/setup-msys2 set up in an earlier step. A workflow checks the project out with its submodules, then
+# uses the action by its path in the checkout:
+# uses: ./externals/xsflib/ci/build-and-test
+name: Build and test
+description: Configure, build and test the project in build/, and upload a file of the build
+inputs:
+  cmake:
+    description: More options for CMake's configure step, such as the generator's platform and toolset
+    required: false
+    default: ""
+  foobar2000:
+    description: "'true' to download the foobar2000 SDK and build the component against it"
+    required: false
+    default: "false"
+  foobar2000-version:
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
+  foobar2000-sha256:
+    description: The SHA-256 of that SDK's archive
+    required: false
+    default: ""
+  test-timeout:
+    description: ctest's limit for each test, in seconds, or empty for ctest's default
+    required: false
+    default: ""
+  test-jobs:
+    description: The number of tests that ctest runs at once
+    required: false
+    default: "4"
+  msys2:
+    description: "'true' to run the commands in the MSYS2 shell (msys2/setup-msys2)"
+    required: false
+    default: "false"
+  artifact-name:
+    description: The name of an artifact to upload after the tests, or empty for none
+    required: false
+    default: ""
+  artifact-path:
+    description: The file or folder that the artifact holds
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download the foobar2000 SDK
+      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version == ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+    - name: Download the project's foobar2000 SDK
+      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version != ''
+      uses: ./externals/xsflib/ci/foobar2000-sdk
+      with:
+        version: ${{ inputs.foobar2000-version }}
+        sha256: ${{ inputs.foobar2000-sha256 }}
+    # The same commands in bash or in the MSYS2 shell. A step's shell can't come from an input.
+    - name: Configure
+      if: inputs.msys2 != 'true'
+      shell: bash
+      run: cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+    - name: Configure in MSYS2
+      if: inputs.msys2 == 'true'
+      shell: msys2 {0}
+      run: cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+    - name: Build
+      if: inputs.msys2 != 'true'
+      shell: bash
+      run: cmake --build build --config Release --parallel
+    - name: Build in MSYS2
+      if: inputs.msys2 == 'true'
+      shell: msys2 {0}
+      run: cmake --build build --config Release --parallel
+    - name: Test
+      if: inputs.msys2 != 'true'
+      shell: bash
+      run: >-
+        ctest --test-dir build --build-config Release --output-on-failure --parallel ${{ inputs.test-jobs }}
+        ${{ inputs.test-timeout != '' && format('--timeout {0}', inputs.test-timeout) || '' }}
+    - name: Test in MSYS2
+      if: inputs.msys2 == 'true'
+      shell: msys2 {0}
+      run: >-
+        ctest --test-dir build --build-config Release --output-on-failure --parallel ${{ inputs.test-jobs }}
+        ${{ inputs.test-timeout != '' && format('--timeout {0}', inputs.test-timeout) || '' }}
+    - name: Upload the artifact
+      if: inputs.artifact-name != ''
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifact-path }}
