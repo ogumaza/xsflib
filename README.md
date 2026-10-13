@@ -2,7 +2,7 @@
 
 xsflib is a C++20 library for players and rippers of the PSF family of formats, often called xSF. It holds the parts
 that don't depend on a console: the PSF container and its tags, playback with length, fade and seeking, the frames of
-command-line play and rip tools, and a foobar2000 input component.
+command-line play and rip tools, a foobar2000 input component and an XMPlay input plugin.
 
 Each module is a static library. A project links the ones it uses.
 
@@ -17,22 +17,23 @@ Each module is a static library. A project links the ones it uses.
 | `xsflib::rip` | The names of a rip's files, functions for rip tools, and the length analysis that times a sequence on a model of a game's sound code |
 
 `include/xsflib/foobar2000/input.h` is a foobar2000 input component as a template on a format's traits.
-`xsflib::testing` holds checks for unit tests, a channel log, and helpers for the tests of a format's sets
-(`testing/sets.h`). The log records a sound's output and its channels. Two logs of one sound can be compared line by
-line.
+`include/xsflib/xmplay/input.h` is an XMPlay input plugin as a template on a format's traits. `xsflib::testing` holds
+checks for unit tests, a channel log, and helpers for the tests of a format's sets (`testing/sets.h`). The log records a
+sound's output and its channels. Two logs of one sound can be compared line by line.
 
-`cmake/XsflibApps.cmake` builds common parts of a program: the Windows version resource, the macOS droplet apps and the
-foobar2000 component. A project includes `cmake/XsflibProject.cmake` from its submodule before it adds the libraries.
-`xsflib_project` sets the C++ standard, a release build by default, the static C runtime and the compiler options that
-keep the output the same on both platforms. With clang-cl and a single-configuration generator (Ninja, NMake), a release
-build requires `-DCMAKE_BUILD_TYPE=Release`. CMake sets `CMAKE_BUILD_TYPE` to Debug there before xsflib can set
-Release. `xsflib_add_libraries` adds the libraries from the project's submodules. `cmake/XsflibPresets.json` has
-`release` and `debug` presets for configuring, building and testing. A project's `CMakePresets.json` includes it from
-the submodule. The include requires presets version 4. That version requires CMake 3.23 or later.
+`cmake/XsflibApps.cmake` builds common parts of a program: the Windows version resource, the macOS droplet apps, the
+foobar2000 component and the XMPlay plugin. A project includes `cmake/XsflibProject.cmake` from its submodule before it
+adds the libraries. `xsflib_project` sets the C++ standard, a release build by default, the static C runtime and the
+compiler options that keep the output the same on both platforms. With clang-cl and a single-configuration generator
+(Ninja, NMake), a release build requires `-DCMAKE_BUILD_TYPE=Release`. CMake sets `CMAKE_BUILD_TYPE` to Debug there
+before xsflib can set Release. `xsflib_add_libraries` adds the libraries from the project's submodules.
+`cmake/XsflibPresets.json` has `release` and `debug` presets for configuring, building and testing. A project's
+`CMakePresets.json` includes it from the submodule. The include requires presets version 4. That version requires CMake
+3.23 or later.
 
-`ci/` holds composite actions for a project's GitHub workflows: building and testing, the steps of a release, and the
-foobar2000 SDK and component. A workflow checks the project out with its submodules, then uses an action by its path in
-the checkout, such as `uses: ./externals/xsflib/ci/build-and-test`.
+`ci/` holds composite actions for a project's GitHub workflows: building and testing, the steps of a release, the
+foobar2000 SDK and component, and the XMPlay plugin SDK and plugin. A workflow checks the project out with its
+submodules, then uses an action by its path in the checkout, such as `uses: ./externals/xsflib/ci/build-and-test`.
 
 ## Building
 
@@ -41,7 +42,8 @@ xsflib requires CMake 3.20 or later and a C++20 compiler. The tests' checks come
 clone. Without the submodule, the build requires an installed seqlib.
 
 xsflib supports macOS on Apple Silicon and Windows x64 built with clang-cl. Other platforms and compilers aren't
-supported.
+supported. An XMPlay plugin is the exception. XMPlay is a 32-bit program, and its plugins build for 32-bit Windows
+with clang-cl (`-A Win32 -T ClangCL`).
 
 - **Windows x64**: Visual Studio 2022 with the C++ workload and its "C++ Clang tools for Windows" component. Configure
   with `cmake -S . -B build -A x64 -T ClangCL` in place of the first command below.

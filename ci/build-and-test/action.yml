@@ -2,9 +2,10 @@
 
 # The steps of a project's CI job after the checkout: configure in build/, build the Release configuration, run ctest,
 # and upload a file of the build if the job names one. With foobar2000 set, the job first downloads the foobar2000 SDK
-# (../foobar2000-sdk) and builds the project's component against it. With msys2 set, the commands run in the MSYS2
-# shell that msys2/setup-msys2 set up in an earlier step. A workflow checks the project out with its submodules, then
-# uses the action by its path in the checkout:
+# (../foobar2000-sdk) and builds the project's component against it. With xmplay set, the job first downloads the
+# XMPlay plugin SDK (../xmplay-sdk) and builds the project's XMPlay plugin against it, in a 32-bit Windows job. With
+# msys2 set, the commands run in the MSYS2 shell that msys2/setup-msys2 set up in an earlier step. A workflow checks the
+# project out with its submodules, then uses the action by its path in the checkout:
 # uses: ./externals/xsflib/ci/build-and-test
 name: Build and test
 description: Configure, build and test the project in build/, and upload a file of the build
@@ -23,6 +24,14 @@ inputs:
     default: ""
   foobar2000-sha256:
     description: The SHA-256 of that SDK's archive
+    required: false
+    default: ""
+  xmplay:
+    description: "'true' to download the XMPlay plugin SDK and build the plugin against it (32-bit Windows only)"
+    required: false
+    default: "false"
+  xmplay-sha256:
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
     required: false
     default: ""
   test-timeout:
@@ -57,15 +66,27 @@ runs:
       with:
         version: ${{ inputs.foobar2000-version }}
         sha256: ${{ inputs.foobar2000-sha256 }}
+    - name: Download the XMPlay plugin SDK
+      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 == ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+    - name: Download the project's XMPlay plugin SDK
+      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 != ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+      with:
+        sha256: ${{ inputs.xmplay-sha256 }}
     # The same commands in bash or in the MSYS2 shell. A step's shell can't come from an input.
     - name: Configure
       if: inputs.msys2 != 'true'
       shell: bash
-      run: cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+      run: >-
+        cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+        ${{ inputs.xmplay == 'true' && '-DXMPLAY_SDK_DIR=xmp-sdk' || '' }}
     - name: Configure in MSYS2
       if: inputs.msys2 == 'true'
       shell: msys2 {0}
-      run: cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+      run: >-
+        cmake -S . -B build ${{ inputs.cmake }} ${{ inputs.foobar2000 == 'true' && '-DFOOBAR2000_SDK_DIR=sdk' || '' }}
+        ${{ inputs.xmplay == 'true' && '-DXMPLAY_SDK_DIR=xmp-sdk' || '' }}
     - name: Build
       if: inputs.msys2 != 'true'
       shell: bash

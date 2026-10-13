@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: MIT
 
-# The packaging of a player's release: download the Windows jobs' artifacts (win-x64 and win32) and make three
-# downloads in dist/: <format>-X.Y.Z-win-x64.zip and <format>-X.Y.Z-win32.zip with the programs, README.md and the
-# licences, and <component>-X.Y.Z.fb2k-component for 64-bit and 32-bit foobar2000, with the 32-bit DLL at the top level
-# and the 64-bit one in x64/. zip, run on Linux, writes the names with forward slashes. foobar2000 requires those in a
-# component. The action runs on a Linux runner, after the checkout:
+# The packaging of a player's release: download the Windows jobs' artifacts (win-x64 and win32) and make the downloads
+# in dist/: <format>-X.Y.Z-win-x64.zip and <format>-X.Y.Z-win32.zip with the programs, README.md and the licences, and
+# <component>-X.Y.Z.fb2k-component for 64-bit and 32-bit foobar2000, with the 32-bit DLL at the top level and the 64-bit
+# one in x64/. With xmplay-plugin set, <plugin>-X.Y.Z.zip holds the XMPlay plugin, a 32-bit DLL, with the licences.
+# zip, run on Linux, writes the names with forward slashes. foobar2000 requires those in a component. The action runs
+# on a Linux runner, after the checkout:
 # uses: ./externals/xsflib/ci/package-player
 name: Package a player
-description: Zip the player's Windows programs and its foobar2000 component into dist/
+description: Zip the player's Windows programs, its foobar2000 component and its XMPlay plugin into dist/
 inputs:
   format:
     description: The format's name in the downloads' names, such as xyz
@@ -21,6 +22,10 @@ inputs:
   component:
     description: The foobar2000 component's name, such as foo_input_xyz
     required: true
+  xmplay-plugin:
+    description: The XMPlay plugin's name, such as xmp-xyz, or empty for a player without one (in the win32 artifact)
+    required: false
+    default: ""
   xsflib-license:
     description: "'true' to add xsflib's LICENSE to each download, as LICENSE-xsflib.txt"
     required: false
@@ -38,6 +43,7 @@ runs:
         VERSION: ${{ inputs.version }}
         PROGRAMS: ${{ inputs.programs }}
         COMPONENT: ${{ inputs.component }}
+        XMPLAY_PLUGIN: ${{ inputs.xmplay-plugin }}
         XSFLIB_LICENSE: ${{ inputs.xsflib-license }}
       run: |
         mkdir -p dist
@@ -60,6 +66,14 @@ runs:
           cp externals/xsflib/LICENSE stage/component/LICENSE-xsflib.txt
         fi
         (cd stage/component && zip -q -X -r "../../dist/$COMPONENT-$VERSION.fb2k-component" .)
+        if [ -n "$XMPLAY_PLUGIN" ]; then
+          mkdir -p stage/xmplay
+          cp "artifacts/win32/$XMPLAY_PLUGIN.dll" LICENSE THIRD-PARTY-NOTICES.md stage/xmplay/
+          if [ "$XSFLIB_LICENSE" = true ]; then
+            cp externals/xsflib/LICENSE stage/xmplay/LICENSE-xsflib.txt
+          fi
+          (cd stage/xmplay && zip -q -X "../../dist/$XMPLAY_PLUGIN-$VERSION.zip" *)
+        fi
         for file in dist/*; do
           echo "$file:"
           unzip -l "$file"

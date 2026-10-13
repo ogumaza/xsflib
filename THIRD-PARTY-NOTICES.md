@@ -11,12 +11,14 @@ stored here.
 | [bzip2](https://sourceware.org/bzip2/), Copyright (C) 1996-2019 Julian R Seward | bzip2 (BSD-style) | Provided as `xsflib::bzip2` (`XSFLIB_DISC_LIBRARIES`) for a library that reads disc images. xsflib's code doesn't use it. The installed copy is used if there is one. Otherwise 1.0.8 is downloaded when configuring. |
 | [libFLAC](https://xiph.org/flac/), Copyright the Xiph.Org Foundation | BSD-3-Clause | FLAC output (`XSFLIB_CLI`). The installed copy is used if there is one. Otherwise 1.5.0 is downloaded when configuring. |
 | [foobar2000 SDK](https://www.foobar2000.org/SDK), Copyright Peter Pawlowski | BSD-style (the SDK's `sdk-license.txt`, and `pfc-license.txt` for its pfc library) | Only for a foobar2000 component that a project builds with xsflib. Not included here. That project supplies the SDK. |
+| [XMPlay plugin SDK](https://www.un4seen.com/xmplay.html), from Un4seen Developments | None stated | Only for an XMPlay plugin that a project builds with xsflib. Its headers declare XMPlay's plugin interface, and its `xmpin.def` names the function that a plugin exports. Not included here. That project supplies the SDK, and `ci/xmplay-sdk` downloads it from un4seen.com. |
 | seqlib | MIT | The checks of the tests (`xsflib::testing`). A project that uses xsflib may supply it. A build of xsflib alone takes it from the submodule `externals/seqlib`. |
 
-Binary distributions must include xsflib's MIT notice, the Zstandard notice when Zstandard is linked in, and the
-libFLAC notice when libFLAC is linked in. Shipping `LICENSE` and this file does that. The licence texts are at the end
-of this file. The licences of zlib, liblzma and bzip2, and those of the foobar2000 SDK and its pfc library, require no
-notice in binaries. seqlib's checks go only into tests.
+Binary distributions must include xsflib's MIT notice, the Zstandard notice when Zstandard is linked in, and the libFLAC
+notice when libFLAC is linked in. Shipping `LICENSE` and this file does that. The licence texts are at the end of this
+file. The licences of zlib, liblzma and bzip2, and those of the foobar2000 SDK and its pfc library, require no notice in
+binaries. An XMPlay plugin contains no code from the XMPlay plugin SDK: it uses only the SDK's declarations. seqlib's
+checks go only into tests.
 
 ## Console data
 

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+
+# Downloads the XMPlay plugin SDK from un4seen.com, checks its SHA-256 and unpacks it into xmp-sdk/ in the workspace. A
+# project's XMPlay plugin builds against it. The SDK states no licence, so it isn't stored in xsflib or in the projects
+# that use it. un4seen.com keeps one copy of the SDK, xmp-sdk.zip, and replaces that file in place when the SDK changes.
+# The SHA-256 check then fails until the pin is updated: download the new file, check that the plugins still build,
+# and change the default below. A project that requires another copy passes its SHA-256 as an input. The action runs on
+# Windows runners. A workflow uses the action by its path in the project's checkout:
+# uses: ./externals/xsflib/ci/xmplay-sdk
+name: XMPlay plugin SDK
+description: Download the XMPlay plugin SDK and unpack it into xmp-sdk/
+inputs:
+  sha256:
+    description: The SHA-256 of the SDK's archive
+    required: false
+    default: 52f7a6f221421b3fd457533d9bc0a8603895b187456b870bab680c32ab436970
+runs:
+  using: composite
+  steps:
+    - name: Download the XMPlay plugin SDK
+      shell: pwsh
+      env:
+        SDK_SHA256: ${{ inputs.sha256 }}
+      run: |
+        $url = "https://www.un4seen.com/files/xmp-sdk.zip"
+        Write-Host "SDK: $url"
+        Invoke-WebRequest -UseBasicParsing $url -OutFile xmp-sdk.zip
+        $hash = (Get-FileHash -Algorithm SHA256 xmp-sdk.zip).Hash.ToLowerInvariant()
+        if ($hash -ne $env:SDK_SHA256) {
+          throw "the SDK's SHA-256 is $hash, not $env:SDK_SHA256. un4seen.com may have replaced the SDK: update the pin."
+        }
+        Expand-Archive xmp-sdk.zip -DestinationPath xmp-sdk -Force

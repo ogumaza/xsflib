@@ -3,7 +3,8 @@
 # The Windows job of a project's release workflow: build the release's targets, check that each program reports the
 # version and that each file contains it in the version resource that Windows shows in its properties, and upload the
 # files as an artifact for the packaging job. With foobar2000 set, the job first downloads the foobar2000 SDK
-# (../foobar2000-sdk). The action runs on a Windows runner, after the checkout:
+# (../foobar2000-sdk). With xmplay set, it first downloads the XMPlay plugin SDK (../xmplay-sdk). The action runs on a
+# Windows runner, after the checkout:
 # uses: ./externals/xsflib/ci/release-windows
 name: Release on Windows
 description: Build the release's Windows files, check their versions and upload them
@@ -39,6 +40,14 @@ inputs:
     description: The SHA-256 of that SDK's archive
     required: false
     default: ""
+  xmplay:
+    description: "'true' to download the XMPlay plugin SDK first, into xmp-sdk/"
+    required: false
+    default: "false"
+  xmplay-sha256:
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -51,6 +60,14 @@ runs:
       with:
         version: ${{ inputs.foobar2000-version }}
         sha256: ${{ inputs.foobar2000-sha256 }}
+    - name: Download the XMPlay plugin SDK
+      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 == ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+    - name: Download the project's XMPlay plugin SDK
+      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 != ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+      with:
+        sha256: ${{ inputs.xmplay-sha256 }}
     - name: Build
       shell: pwsh
       run: |

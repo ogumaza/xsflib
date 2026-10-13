@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: MIT
+
+// The options page of an XMPlay plugin (xsflib/xmplay/input.h, built by xsflib_add_xmplay_plugin in
+// cmake/XsflibApps.cmake). XMPlay shows dialog 1000 of a plugin's resources in its options window. The page's Apply
+// button is control 1000. The plugin template numbers the other controls the same way.
+
+#include <windows.h>
+
+1000 DIALOG 0, 0, 262, 175
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 8, "MS Shell Dlg"
+BEGIN
+    GROUPBOX        "Files without a length tag", -1, 5, 3, 252, 50
+    LTEXT           "Length (seconds):", -1, 12, 19, 100, 8
+    EDITTEXT        10, 116, 17, 44, 12, ES_NUMBER | ES_AUTOHSCROLL
+    LTEXT           "Fade (seconds):", -1, 12, 35, 100, 8
+    EDITTEXT        11, 116, 33, 44, 12, ES_NUMBER | ES_AUTOHSCROLL
+    GROUPBOX        "Playback", -1, 5, 58, 252, 42
+    AUTOCHECKBOX    "Play endlessly (ignore lengths)", 12, 12, 71, 238, 10
+    AUTOCHECKBOX    "Render ahead (quicker seeking; uses more CPU and memory)", 13, 12, 85, 238, 10
+    DEFPUSHBUTTON   "Apply", 1000, 207, 145, 50, 12
+END

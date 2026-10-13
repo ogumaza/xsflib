@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+
+# The job of a player's XMPlay plugin workflow: build the plugin for XMPlay, a 32-bit program, with clang-cl, and upload
+# the DLL with the project's licences as the artifact named after the plugin. The XMPlay plugin SDK comes from
+# ../xmplay-sdk. The action runs on a Windows runner, after the checkout:
+# uses: ./externals/xsflib/ci/xmplay-windows
+name: XMPlay plugin on Windows
+description: Build the XMPlay plugin's 32-bit DLL and upload it
+inputs:
+  plugin:
+    description: The plugin's target, such as xmp-xyz
+    required: true
+  xmplay-sha256:
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Download the XMPlay plugin SDK
+      if: inputs.xmplay-sha256 == ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+    - name: Download the project's XMPlay plugin SDK
+      if: inputs.xmplay-sha256 != ''
+      uses: ./externals/xsflib/ci/xmplay-sdk
+      with:
+        sha256: ${{ inputs.xmplay-sha256 }}
+    - name: Build (Win32)
+      shell: pwsh
+      run: |
+        cmake -S . -B build-win32 -A Win32 -T ClangCL -DXMPLAY_SDK_DIR="${{ github.workspace }}/xmp-sdk"
+        cmake --build build-win32 --config Release --target ${{ inputs.plugin }}
+    - name: Collect the DLL and the licences
+      shell: pwsh
+      env:
+        PLUGIN: ${{ inputs.plugin }}
+      run: |
+        New-Item -ItemType Directory -Force pkg | Out-Null
+        Copy-Item "build-win32/plugins/xmplay/Release/$env:PLUGIN.dll" pkg/
+        Copy-Item LICENSE, THIRD-PARTY-NOTICES.md pkg/
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.plugin }}
+        path: pkg/

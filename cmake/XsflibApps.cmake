@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 
 # The parts of a program's build that the projects using xsflib share: the Windows version resource and UTF-8 code
-# page, the macOS droplet apps, a sequence converter's tests, the foobar2000 component, and the hook for locally
-# supplied tests. The functions are available to a project once it has added xsflib.
+# page, the macOS droplet apps, a sequence converter's tests, the foobar2000 component, the XMPlay plugin, and the hook
+# for locally supplied tests. The functions are available to a project once it has added xsflib.
 
 # Gives `target` the version `VERSION`. The target's sources get the version as the string macro `DEFINE`, if given. On
 # Windows, the target also gets the version resource that Explorer shows in the file's properties, with DESCRIPTION,
@@ -289,6 +289,34 @@ function(xsflib_add_foobar2000_component name)
         # headers. SYSTEM (/external:W0) doesn't reach it there.
         target_compile_options(${name} PRIVATE ${arg_OPTIONS} /wd4702)
     endif()
+endfunction()
+
+# The XMPlay input plugin `name`, built from SOURCES against the XMPlay plugin SDK in SDK and linked with LIBRARIES.
+# XMPlay is a 32-bit Windows program. The plugin is therefore a 32-bit DLL, built with clang-cl. XMPlay's plugins are
+# named xmp-*.dll, such as xmp-xyz.dll. OPTIONS are the compile options of the plugin's sources. The SDK's xmpin.def
+# exports XMPIN_GetInterface by name, and templates/xmplay_options.rc holds the options page of xsflib/xmplay/input.h.
+#
+#   xsflib_add_xmplay_plugin(xmp-xyz SDK ${XMPLAY_SDK_DIR} SOURCES xmp_xyz.cpp LIBRARIES xyz_core)
+function(xsflib_add_xmplay_plugin name)
+    cmake_parse_arguments(arg "" "SDK" "SOURCES;LIBRARIES;OPTIONS" ${ARGN})
+    if (NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(FATAL_ERROR "the XMPlay plugin requires clang-cl for 32-bit Windows (cmake -A Win32 -T ClangCL). "
+                            "XMPlay is a 32-bit program.")
+    endif()
+
+    foreach (file xmpin.h xmpfunc.h xmpin.def)
+        if (NOT EXISTS ${arg_SDK}/${file})
+            message(FATAL_ERROR "XMPLAY_SDK_DIR (${arg_SDK}) has no ${file}: point it at the unpacked XMPlay plugin SDK")
+        endif()
+    endforeach()
+
+    add_library(${name} SHARED ${arg_SOURCES} ${arg_SDK}/xmpin.def
+                ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/xmplay_options.rc)
+    # SYSTEM so that the SDK's headers don't raise warnings in the plugin's build.
+    target_include_directories(${name} SYSTEM PRIVATE ${arg_SDK})
+    target_link_libraries(${name} PRIVATE ${arg_LIBRARIES})
+    target_compile_definitions(${name} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_options(${name} PRIVATE ${arg_OPTIONS})
 endfunction()
 
 # Includes local_tests.cmake from each folder directly below the project's source folder. Those files register tests
