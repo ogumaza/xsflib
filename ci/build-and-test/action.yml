@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 
 # The steps of a project's CI job after the checkout: configure in build/, build the Release configuration, run ctest,
-# and upload a file of the build if the job names one. With foobar2000 set, the job first downloads the foobar2000 SDK
-# (../foobar2000-sdk) and builds the project's component against it. With xmplay set, the job first downloads the
-# XMPlay plugin SDK (../xmplay-sdk) and builds the project's XMPlay plugin against it, in a 32-bit Windows job. With
-# msys2 set, the commands run in the MSYS2 shell that msys2/setup-msys2 set up in an earlier step. A workflow checks the
-# project out with its submodules, then uses the action by its path in the checkout:
+# print the tests' annotations, and upload a file of the build if the job names one. With foobar2000 set, the job
+# first downloads the foobar2000 SDK (../foobar2000-sdk) and builds the project's component against it. With xmplay
+# set, the job first downloads the XMPlay plugin SDK (../xmplay-sdk) and builds the project's XMPlay plugin against it,
+# in a 32-bit Windows job. With msys2 set, the commands run in the MSYS2 shell that msys2/setup-msys2 set up in an
+# earlier step. A workflow checks the project out with its submodules, then uses the action by its path in the
+# checkout:
 # uses: ./externals/xsflib/ci/build-and-test
 name: Build and test
 description: Configure, build and test the project in build/, and upload a file of the build
@@ -107,6 +108,13 @@ runs:
       run: >-
         ctest --test-dir build --build-config Release --output-on-failure --parallel ${{ inputs.test-jobs }}
         ${{ inputs.test-timeout != '' && format('--timeout {0}', inputs.test-timeout) || '' }}
+    # A test can write GitHub Actions workflow commands, such as a warning, to a file named annotations.txt in the
+    # build folder. With --output-on-failure, ctest prints nothing of a test that passes. This step prints the files
+    # whatever the tests' outcome. The run's summary then shows the annotations.
+    - name: Print the tests' annotations
+      if: always()
+      shell: bash
+      run: if [ -d build ]; then find build -name annotations.txt -type f -exec cat {} +; fi
     - name: Upload the artifact
       if: inputs.artifact-name != ''
       uses: actions/upload-artifact@v7

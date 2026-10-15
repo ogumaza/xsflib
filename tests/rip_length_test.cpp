@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// Tests the length analysis (rip/length.h) on a scripted model: the timing helpers, loops, a loop with no sound after
-// its first pass, a sequence that never sounds, the ends, the busy silence, the limit, a steady sequence, ringing
-// effects, a failing frame, and the rules that differ between models.
+// Tests the length analysis (rip/length.h) on a scripted model: the timing helpers, loops, other tracks that hold the
+// fade back, a loop with no sound after its first pass, a sequence that never sounds, the ends, the busy silence, the
+// limit, a steady sequence, ringing effects, a failing frame, and the rules that differ between models.
 
 #include <cstdint>
 #include <cstdio>
@@ -236,6 +236,53 @@ void TestLoops()
     XSFLIB_CHECK(Is(Measure(late), 213, 10000));
 }
 
+// A scripted model whose other tracks loop at other lengths. They have looped twice once frame `others_at` has run.
+struct OthersModel : ScriptedModel
+{
+    bool OthersLooped(int track) const
+    {
+        asked_for = track;
+
+        return frames > others_at;
+    }
+
+    uint64_t others_at = 0;
+    mutable int asked_for = -1; // the track whose loops count, as MeasureLength last gave it
+};
+
+void TestOthersLooped()
+{
+    // Track 1 goes round at frames 100 and 200. Other tracks that loop for the second time in frame 350 move the loop's
+    // point to the end of frame 350, or its start with the same-frame rules. Others that looped before frame 200 leave
+    // it at frame 200.
+    const auto twice = [](ScriptedModel& m, uint64_t frame)
+    {
+        m.sound = true;
+
+        if (frame == 100 || frame == 200)
+        {
+            m.Loop(1, 0x40);
+        }
+    };
+    OthersModel late;
+    late.script = twice;
+    late.others_at = 350;
+    OthersModel late_same_frame;
+    late_same_frame.script = twice;
+    late_same_frame.others_at = 350;
+    OthersModel early;
+    early.script = twice;
+    early.others_at = 150;
+
+    const std::optional<rip::Timing> late_timing = rip::MeasureLength(late, rip::LengthRules{});
+    const std::optional<rip::Timing> late_same_frame_timing = rip::MeasureLength(late_same_frame, SameFrameRules());
+    const std::optional<rip::Timing> early_timing = rip::MeasureLength(early, rip::LengthRules{});
+
+    XSFLIB_CHECK(Is(late_timing, 1053, 10000) && late.asked_for == 1);
+    XSFLIB_CHECK(Is(late_same_frame_timing, 1050, 10000));
+    XSFLIB_CHECK(Is(early_timing, 603, 10000));
+}
+
 void TestLoopWithoutSound()
 {
     // The sound stops after frame 100, the frame of the first pass. With the default rules, frame 100's commands sound
@@ -410,6 +457,7 @@ int main()
 {
     TestTimings();
     TestLoops();
+    TestOthersLooped();
     TestLoopWithoutSound();
     TestEnds();
     TestBusySilenceAndLimit();

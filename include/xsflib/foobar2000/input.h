@@ -23,7 +23,8 @@
 //   kExtensions             the extensions that play, without dots
 //   kPsfVersion             the format's PSF version byte
 //   kMaxFileSize            the largest file the component reads into memory
-//   kVariablesTag           a tag that editing keeps as it is, besides the PSF system tags, or nullptr
+//   kKeptTags               the tags that editing keeps as they are, besides the PSF system tags: a std::array of
+//                           names, such as the format's variables tag, or an empty one
 //   kInputGuid, kBranchGuid, kLengthGuid, kFadeGuid, kEndlessGuid, kRenderAheadGuid
 
 #pragma once
@@ -470,13 +471,16 @@ private:
     using Playback = player::Playback<Player>;
     using Options = player::PlaybackOptions<Player>;
 
-    // PSF tags that aren't metadata, and the format's variables tag. Editing the tags leaves these unchanged. A
-    // sequence that waits for its variables would go silent if removing the tags dropped them.
+    // PSF tags that aren't metadata, and the format's kept tags. Editing the tags leaves these unchanged. A sequence
+    // that waits for its variables would go silent if removing the tags dropped them.
     static bool IsSystemTag(const std::string& name)
     {
-        if (Traits::kVariablesTag != nullptr && name == Traits::kVariablesTag)
+        for (const char* tag : Traits::kKeptTags)
         {
-            return true;
+            if (name == tag)
+            {
+                return true;
+            }
         }
 
         return name.starts_with("_lib") || name == "length" || name == "fade" || name == "volume" || name == "utf8";

@@ -86,6 +86,22 @@ struct VoicePlace
     int64_t position = 0;
 };
 
+// Whether every track of `model` other than `track` has looped kLengthLoops times, by the model's OthersLooped (see
+// MeasureLength). A model without it has no tracks that hold the fade back. `model` isn't const, so that a model's
+// OthersLooped counts whether it's declared const or not.
+template <typename Model>
+bool OtherTracksLooped([[maybe_unused]] Model& model, [[maybe_unused]] int track)
+{
+    if constexpr (requires { model.OthersLooped(track); })
+    {
+        return model.OthersLooped(track);
+    }
+    else
+    {
+        return true;
+    }
+}
+
 // Plays a sequence on a model and works out its timing. Returns nothing if a frame fails. The model's adapter, `model`,
 // has the sequence started, and provides these:
 //
@@ -96,6 +112,10 @@ struct VoicePlace
 // - `bool Active()`, `Settled()`, `Stuck()` and `Moving()`, and `uint64_t ChangedAt()`: the sequence player's tests.
 // - `bool Busy()`, `bool ChannelsChanging()` and `int ActiveChannels()`: the engine's tests.
 // - `void OnLoop(F)` sets the player's loop hook to `F`, a callable that takes a track and the loop's target.
+//
+// The model may also provide `bool OthersLooped(int track)`: whether every track other than `track`, the track whose
+// loops count, has looped kLengthLoops times or doesn't hold the fade back. A model whose tracks loop at other lengths
+// then gets its fade once each of them has played its loop twice.
 //
 // MeasureLength plays until the sequence loops kLengthLoops times, ends, falls silent for good, or reaches the limit.
 template <typename Model>
@@ -236,10 +256,17 @@ std::optional<Timing> MeasureLength(Model& model, const LengthRules& rules)
         }
 
         // A loop that went round without a sound, such as a wait that a track repeats once its notes have ended, isn't
-        // music: the sequence ended at its last sound.
+        // music: the sequence ended at its last sound. Other tracks that loop at other lengths hold the fade back until
+        // each of them has looped kLengthLoops times too (the model's OthersLooped). Until then, each frame moves the
+        // loop's point on to the next frame. The fade then starts where the last of them looped.
         if (loops_seen >= kLengthLoops)
         {
-            return heard(last_sound < first_loop_frame ? end_at(last_sound + 1) : loop_at(loop_frame));
+            if (OtherTracksLooped(model, loop.first))
+            {
+                return heard(last_sound < first_loop_frame ? end_at(last_sound + 1) : loop_at(loop_frame));
+            }
+
+            loop_frame = frame + 1 + rules.loop_offset;
         }
 
         follow_sound();

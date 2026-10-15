@@ -35,12 +35,12 @@ macro(xsflib_project)
         if (WIN32 AND NOT MSVC)
             message(FATAL_ERROR "${_xsflib_project_NAME} doesn't support ${_xsflib_project_compiler} on Windows, such "
                                 "as MinGW's GCC or the GNU-style clang++. Build with Visual Studio's clang-cl (cmake -T "
-                                "ClangCL) or with MSVC; README.md has the steps.")
+                                "ClangCL). README.md has the steps.")
         endif()
         if (NOT MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i.86|x86|x86_64|AMD64)$")
             message(FATAL_ERROR "${_xsflib_project_NAME} doesn't support 32-bit x86 builds with "
                                 "${_xsflib_project_compiler}: their output would differ from other builds. Build for "
-                                "64-bit instead, or on Windows use clang-cl or MSVC. They build 32-bit x86 with SSE2.")
+                                "64-bit instead, or on Windows use clang-cl. clang-cl builds 32-bit x86 with SSE2.")
         endif()
         if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
             set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)

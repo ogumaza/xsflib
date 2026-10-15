@@ -174,7 +174,7 @@ function(xsflib_add_converter_tests converter)
     endif()
 endfunction()
 
-# The foobar2000 component `name` (Windows with clang-cl or MSVC, or macOS), built from SOURCES against the SDK in SDK
+# The foobar2000 component `name` (Windows with clang-cl, or macOS), built from SOURCES against the SDK in SDK
 # and linked with LIBRARIES. It's a DLL on Windows and a .component bundle on macOS. OPTIONS are the compile options of
 # the component's sources. BUNDLE_ID is the macOS bundle identifier, and VERSION the bundle's version.
 #
@@ -185,7 +185,7 @@ endfunction()
 function(xsflib_add_foobar2000_component name)
     cmake_parse_arguments(arg "" "SDK;VERSION;BUNDLE_ID" "SOURCES;LIBRARIES;OPTIONS" ${ARGN})
     if (NOT MSVC AND NOT APPLE)
-        message(FATAL_ERROR "the foobar2000 component requires clang-cl or MSVC on Windows, or macOS")
+        message(FATAL_ERROR "the foobar2000 component requires clang-cl on Windows, or macOS")
     endif()
 
     set(SDK ${arg_SDK})
