@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-// zlib's part of the PSF container (see psf.h): the default decompressor, and the writer.
+// zlib's part of the PSF container (see psf.h): the default decompressor, and the writer. Both use code that the
+// streaming program shares (streaming.cpp): the inflater and the writer of a PSF file in pieces.
 
 #include "xsflib/psf/psf.h"
-
-#include <zlib.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -12,6 +11,8 @@
 #include <span>
 #include <string>
 #include <vector>
+
+#include <zlib.h>
 
 #include "inflate.h"
 #include "xsflib/psf/streaming.h"

@@ -8,7 +8,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -18,7 +17,6 @@
 #include "xsflib/testing/check.h"
 
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 namespace fs = std::filesystem;
 
 namespace
@@ -183,13 +181,5 @@ int main()
 
     fs::remove_all(dir);
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("play tool tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("play tool");
 }

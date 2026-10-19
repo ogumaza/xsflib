@@ -4,8 +4,6 @@
 
 #include "xsflib/cli/audio_out.h"
 
-#include <FLAC/stream_encoder.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +11,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <FLAC/stream_encoder.h>
 
 #include "xsflib/ascii.h"
 #include "xsflib/files.h"

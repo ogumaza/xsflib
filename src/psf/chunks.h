@@ -14,9 +14,14 @@
 namespace xsflib::psf::detail
 {
 
-// Splits a decompressed program into its chunks. With `memory_chunks`, MEM chunks go into `out.memory`. With
-// `sound_chunks`, a SND chunk sets `out.sound`. Other chunks, and those that the switches leave out, are skipped.
-std::optional<std::string> ParseChunks(const std::vector<uint8_t>& program, ProgramChunks& out, bool memory_chunks,
-                                       bool sound_chunks);
+// The chunks that a program's reader takes besides FILE chunks. It skips the others, and every unknown type.
+struct ChunkKinds
+{
+    bool memory = true; // MEM chunks go into ProgramChunks::memory
+    bool sound = true;  // a SND chunk sets ProgramChunks::sound
+};
+
+// Splits a decompressed program into its chunks: the FILE chunks, and those that `kinds` takes.
+std::optional<std::string> ParseChunks(const std::vector<uint8_t>& program, ProgramChunks& out, ChunkKinds kinds);
 
 } // namespace xsflib::psf::detail

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "chunks.h"
+#include "output_mode.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/psf/streaming.h"
 
@@ -22,11 +23,7 @@ void ProgramBuilder::Chunk(const char type[4], const std::vector<uint8_t>& paylo
     program_.insert(program_.end(), type, type + 4);
     Put32(program_, static_cast<uint32_t>(payload.size()));
     program_.insert(program_.end(), payload.begin(), payload.end());
-
-    while (program_.size() % 4)
-    {
-        program_.push_back(0);
-    }
+    PadTo4(program_);
 }
 
 void ProgramBuilder::AddMemory(uint32_t address, const void* data, std::size_t size)
@@ -57,7 +54,7 @@ void ProgramBuilder::AddSound(uint32_t sound_id)
 std::optional<std::string> ParseProgram(const std::vector<uint8_t>& program, ProgramChunks& out,
                                         const ProgramOptions& options)
 {
-    return detail::ParseChunks(program, out, true, options.sound_chunks);
+    return detail::ParseChunks(program, out, {.memory = true, .sound = options.sound_chunks});
 }
 
 const std::vector<uint8_t>* FindFile(const std::vector<FileChunk>& files, const std::string& path)
@@ -142,20 +139,10 @@ std::optional<std::string> CheckDriverBlock(const std::vector<MemChunk>& memory,
 
     if (layout.output_mode_offset && *mode != layout.output_mode)
     {
-        return "the driver block's output mode is " + std::to_string(*mode) + OutputModeExpected();
+        return "the driver block's output mode is " + std::to_string(*mode) + detail::kOutputModeExpected;
     }
 
     return std::nullopt;
-}
-
-const char* FlagsExpected()
-{
-    return "; version 1 requires only bit 0 (DSP required) to be set";
-}
-
-const char* OutputModeExpected()
-{
-    return "; version 1 supports only stereo (1)";
 }
 
 } // namespace xsflib::psf

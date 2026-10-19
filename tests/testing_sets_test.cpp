@@ -38,9 +38,10 @@ void TestMapReader()
     XSFLIB_CHECK(!reader("dir/missing.tst", data));
 }
 
-// The failures that `f`'s checks report. The test takes them back, and keeps their messages out of its output.
+// The failures that `f`'s checks report. The test takes them back, and keeps their messages out of its output. A given
+// `messages` gets the messages.
 template <typename F>
-int FailuresOf(F f)
+int FailuresOf(F f, std::string* messages = nullptr)
 {
     std::ostringstream caught;
     std::ostream* const stream = seqlib::testing::failure_stream;
@@ -50,6 +51,11 @@ int FailuresOf(F f)
     const int found = failures - before;
     failures = before;
     seqlib::testing::failure_stream = stream;
+
+    if (messages != nullptr)
+    {
+        *messages = caught.str();
+    }
 
     return found;
 }
@@ -130,19 +136,17 @@ void TestRenderAll()
     XSFLIB_CHECK(xsflib::testing::RenderAll<CountingPlayback>("song", {}, 7) == expected);
     XSFLIB_CHECK(xsflib::testing::RenderAll<CountingPlayback>("song", {}) == expected);
 
-    // A playback that doesn't open gives nothing, and fails one check that names the playback's error. The test catches
-    // that failure's message, and takes the failure back.
-    std::ostringstream caught;
-    std::ostream* const stream = seqlib::testing::failure_stream;
-    seqlib::testing::failure_stream = &caught;
-    const int before = failures;
+    // A playback that doesn't open gives nothing, and fails one check that names the playback's error.
+    bool empty = false;
+    std::string messages;
+    const auto render = [&]
+    {
+        empty = xsflib::testing::RenderAll<CountingPlayback>("broken", {}).empty();
+    };
 
-    const bool empty = xsflib::testing::RenderAll<CountingPlayback>("broken", {}).empty();
+    const int found = FailuresOf(render, &messages);
 
-    const bool failed_once = failures == before + 1;
-    failures = before;
-    seqlib::testing::failure_stream = stream;
-    XSFLIB_CHECK(empty && failed_once && caught.str().find("broken plays: it doesn't open") != std::string::npos);
+    XSFLIB_CHECK(empty && found == 1 && messages.find("broken plays: it doesn't open") != std::string::npos);
 }
 
 // A model's output of `frames` stereo frames, with samples that differ from each other and from 0.

@@ -13,6 +13,7 @@
 //   --jobs N              length analyses run in parallel (default: the number of CPU threads)
 //   --game NAME, --artist NAME, --year YEAR, --copyright TEXT, --by NAME
 //   --version             print the version
+//   -h, --help            print the format's usage
 //
 // The inputs are ripped one after another. An input that fails doesn't stop the rest. Each format gives its names, its
 // help, the wording of some messages and its other options in a RipTool, and rips each input itself. The format's main
@@ -32,10 +33,8 @@
 #include <new>
 #include <optional>
 #include <regex>
-#include <set>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -452,8 +451,6 @@ int ParseRipArgs(const RipTool<Options>& tool, int argc, char** argv, Options& o
 template <typename Options>
 int RunRip(const RipTool<Options>& tool, int argc, char** argv)
 {
-    namespace fs = std::filesystem;
-
     Options o;
     o.by = tool.name;
     std::vector<std::string> inputs;
@@ -475,37 +472,10 @@ int RunRip(const RipTool<Options>& tool, int argc, char** argv)
         }
     }
 
-    // Rip each input once, continuing after errors. Return the highest exit code.
+    // The rips share the file names of the folders written so far. An input whose canonical path can't be found counts
+    // by its absolute path without a trailing separator.
     FileNameRegistries names;
-    std::set<fs::path> done;
-    int result = 0;
-    for (std::size_t i = 0; i < inputs.size(); i++)
-    {
-        if (inputs.size() > 1)
-        {
-            std::fprintf(stderr, "%s%s:\n", i ? "\n" : "", rip::InputPath(inputs[i]).filename().string().c_str());
-        }
-
-        std::error_code ec;
-        const fs::path canonical = fs::weakly_canonical(inputs[i], ec);
-        if (!done.insert(ec ? rip::InputPath(inputs[i]) : canonical).second)
-        {
-            std::fprintf(stderr, "skipped duplicate input\n");
-            continue;
-        }
-
-        try
-        {
-            result = std::max(result, tool.rip_input(inputs[i], o, names));
-        }
-        catch (const std::exception& e)
-        {
-            std::fprintf(stderr, "error: %s: %s\n", inputs[i].c_str(), e.what());
-            result = std::max(result, 1);
-        }
-    }
-
-    return result;
+    return RunEachInput(inputs, rip::InputPath, [&](const std::string& in) { return tool.rip_input(in, o, names); });
 }
 
 } // namespace detail

@@ -7,7 +7,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -17,8 +16,6 @@
 
 #include "xsflib/testing/check.h"
 #include "xsflib/text.h"
-
-using xsflib::testing::failures;
 
 namespace fs = std::filesystem;
 
@@ -157,13 +154,5 @@ int main()
     TestFiles();
     TestNumbers();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("files tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("files");
 }

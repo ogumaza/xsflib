@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MIT
+
+// SHA-256 (FIPS 180-4). Sha256 computes the hash of a message added in one or more parts. Its interface is Sha1's
+// (sha1.h).
+
+#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <string>
+
+namespace xsflib
+{
+
+class Sha256
+{
+public:
+    using Digest = std::array<uint8_t, 32>;
+
+    Sha256();
+
+    // Adds data to the message.
+    void Update(std::span<const uint8_t> data);
+
+    // Finishes the message and returns its hash. The object can't be updated afterwards.
+    Digest Finish();
+
+    // The hash of `data` alone.
+    static Digest Of(std::span<const uint8_t> data);
+
+    // A hash as 64 lowercase hex digits.
+    static std::string Hex(const Digest& digest);
+
+private:
+    void Block(const uint8_t* block);
+
+    std::array<uint32_t, 8> state_;
+    std::array<uint8_t, 64> buffer_{};
+    std::size_t buffered_ = 0;
+    uint64_t length_ = 0; // bytes added so far
+};
+
+} // namespace xsflib

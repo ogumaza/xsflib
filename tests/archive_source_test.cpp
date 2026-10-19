@@ -7,7 +7,6 @@
 #include "xsflib/player/archive_source.h"
 
 #include <cstdint>
-#include <cstdio>
 #include <map>
 #include <memory>
 #include <optional>
@@ -15,8 +14,6 @@
 #include <vector>
 
 #include "xsflib/testing/check.h"
-
-using xsflib::testing::failures;
 
 namespace
 {
@@ -335,13 +332,5 @@ int main()
     TestKeptArchive();
     TestSnapshotsAndReloads();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("archive source tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("archive source");
 }

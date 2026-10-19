@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <random>
 #include <vector>
 
@@ -13,7 +12,6 @@
 #include "xsflib/testing/check.h"
 
 using namespace xsflib;
-using xsflib::testing::failures;
 
 namespace
 {
@@ -97,13 +95,5 @@ int main()
 {
     TestMemoryImages();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d checks failed\n", failures);
-        return 1;
-    }
-
-    std::printf("snapshot tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("snapshot");
 }

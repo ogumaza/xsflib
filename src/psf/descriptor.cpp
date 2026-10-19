@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-#include "xsflib/psf/program.h"
+#include "output_mode.h"
 #include "xsflib/text.h"
 
 namespace xsflib::psf
@@ -28,7 +28,8 @@ std::optional<std::string> CheckDescriptorFlags(std::string_view name, uint32_t 
 {
     if (flags != required)
     {
-        const std::string expected = required == 0 ? "; version 1 has none" : FlagsExpected();
+        const std::string expected =
+            required == 0 ? "; version 1 has none" : "; version 1 requires only bit 0 (DSP required) to be set";
         return "the " + std::string(name) + " descriptor's flags are " + Hex(flags) + expected;
     }
 
@@ -40,7 +41,7 @@ std::optional<std::string> CheckDescriptorOutputMode(std::string_view name, uint
     if (output_mode != kDescriptorOutputStereo)
     {
         return "the " + std::string(name) + " descriptor's output mode is " + std::to_string(output_mode) +
-               OutputModeExpected();
+               detail::kOutputModeExpected;
     }
 
     return std::nullopt;

@@ -5,7 +5,6 @@
 
 #include "xsflib/rip/file_names.h"
 
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -16,7 +15,6 @@
 #include "xsflib/testing/check.h"
 
 using xsflib::rip::FileNames;
-using xsflib::testing::failures;
 
 static void TestCharacters()
 {
@@ -141,13 +139,5 @@ int main()
     TestReservedNames();
     TestNamesDifferInMoreThanCase();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("file name tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("file name");
 }

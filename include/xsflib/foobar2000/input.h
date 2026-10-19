@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// A foobar2000 input component: a template on each format's traits. Modelled on kode54's PSF-family inputs
-// (foo_input_vio2sf, foo_input_ncsf). PSF tags are shown as metadata (game as album, year as date). Length and fade
-// come from the tags, or from the defaults in Advanced preferences > Decoding > the format's decoder. The tags can be
-// edited.
+// A foobar2000 input component: a template on each format's traits. PSF tags are shown as metadata (game as album,
+// year as date). Length and fade come from the tags, or from the defaults in Advanced preferences > Decoding > the
+// format's decoder. The tags can be edited.
 //
 // The format's player does the emulation. While playing, the component renders ahead on a worker thread and buffers the
 // audio (see xsflib/player/render_ahead.h). Seeks within the buffer are instant. Seeks further ahead wait for rendering
@@ -23,14 +22,14 @@
 //   kExtensions             the extensions that play, without dots
 //   kPsfVersion             the format's PSF version byte
 //   kMaxFileSize            the largest file the component reads into memory
-//   kKeptTags               the tags that editing keeps as they are, besides the PSF system tags: a std::array of
-//                           names, such as the format's variables tag, or an empty one
+//   kPlaybackTags           the format's tags that set how a file plays, such as a sequence's variables: a std::array
+//                           of names, or an empty one. They aren't metadata. foobar2000 doesn't show them, and editing
+//                           the tags keeps them as they are
 //   kInputGuid, kBranchGuid, kLengthGuid, kFadeGuid, kEndlessGuid, kRenderAheadGuid
 
 #pragma once
 
-#include <SDK/foobar2000.h>
-
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -39,6 +38,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <SDK/foobar2000.h>
 
 #include "xsflib/ascii.h"
 #include "xsflib/player/playback.h"
@@ -177,7 +178,7 @@ public:
         bool have_rg = false;
         for (const auto& [name, value] : tags_)
         {
-            if (IsSystemTag(name))
+            if (IsHiddenTag(name))
             {
                 continue;
             }
@@ -364,23 +365,14 @@ public:
         file_->on_idle(p_abort);
     }
 
-    // Rewrites the tag area with the edited tags. The program and the system tags (_lib, length, fade and volume) stay
-    // as they are.
+    // Rewrites the tag area with the edited tags. The program and the hidden tags (IsHiddenTag) stay as they are.
     void retag(const file_info& p_info, abort_callback& p_abort)
     {
-        psf::Tags tags;
-        for (const auto& [name, value] : tags_)
-        {
-            if (IsSystemTag(name))
-            {
-                tags[name] = value;
-            }
-        }
-
+        psf::Tags tags = HiddenTags();
         for (t_size i = 0; i < p_info.meta_get_count(); i++)
         {
             const std::string tag = detail::TagFromField(AsciiLower(p_info.meta_enum_name(i)));
-            if (tag.empty() || IsSystemTag(tag) || tag.find('=') != std::string::npos)
+            if (tag.empty() || IsHiddenTag(tag) || tag.find('=') != std::string::npos)
             {
                 continue;
             }
@@ -424,18 +416,10 @@ public:
         WriteTags(tags, p_abort);
     }
 
+    // Rewrites the tag area with the hidden tags alone.
     void remove_tags(abort_callback& p_abort)
     {
-        psf::Tags tags;
-        for (const auto& [name, value] : tags_)
-        {
-            if (IsSystemTag(name))
-            {
-                tags[name] = value;
-            }
-        }
-
-        WriteTags(tags, p_abort);
+        WriteTags(HiddenTags(), p_abort);
     }
 
     static bool g_is_our_content_type(const char* /*p_content_type*/)
@@ -471,19 +455,28 @@ private:
     using Playback = player::Playback<Player>;
     using Options = player::PlaybackOptions<Player>;
 
-    // PSF tags that aren't metadata, and the format's kept tags. Editing the tags leaves these unchanged. A sequence
-    // that waits for its variables would go silent if removing the tags dropped them.
-    static bool IsSystemTag(const std::string& name)
+    // Whether foobar2000 leaves the tag `name` out of the metadata: a PSF tag that isn't metadata, or one of the
+    // format's playback tags. Editing the tags leaves these unchanged. A sequence that waits for its variables would go
+    // silent if removing the tags dropped them.
+    static bool IsHiddenTag(std::string_view name)
     {
-        for (const char* tag : Traits::kKeptTags)
+        return psf::IsSystemTag(name) || std::any_of(Traits::kPlaybackTags.begin(), Traits::kPlaybackTags.end(),
+                                                     [name](const char* tag) { return name == tag; });
+    }
+
+    // The file's tags that IsHiddenTag names.
+    psf::Tags HiddenTags() const
+    {
+        psf::Tags tags;
+        for (const auto& [name, value] : tags_)
         {
-            if (name == tag)
+            if (IsHiddenTag(name))
             {
-                return true;
+                tags[name] = value;
             }
         }
 
-        return name.starts_with("_lib") || name == "length" || name == "fade" || name == "volume" || name == "utf8";
+        return tags;
     }
 
     static void ReadWhole(file::ptr& f, std::vector<uint8_t>& out, abort_callback& abort)
@@ -516,11 +509,7 @@ private:
     // The file's tagged length and fade, or the defaults. Playback uses these values.
     player::TrackLength GetLength() const
     {
-        const auto length = tags_.find("length");
-        const auto fade = tags_.find("fade");
-        const long long length_ms = length != tags_.end() ? psf::ParseTime(length->second) : -1;
-        const long long fade_ms = fade != tags_.end() ? psf::ParseTime(fade->second) : -1;
-        return player::ResolveLength(length_ms, fade_ms, DefaultOptions());
+        return player::ResolveLength(psf::TagTimeMs(tags_, "length"), psf::TagTimeMs(tags_, "fade"), DefaultOptions());
     }
 
     void WriteTags(const psf::Tags& tags, abort_callback& p_abort)

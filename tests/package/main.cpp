@@ -3,7 +3,6 @@
 // Uses xsflib from another project: writes a PSF file in memory and reads it back.
 
 #include <cstdint>
-#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,13 +24,5 @@ int main()
     XSFLIB_CHECK(psf.version == 0x27 && psf.reserved == kReserved && psf.program == kProgram && psf.tags == kTags);
     XSFLIB_CHECK(xsflib::psf::ParseTime(psf.tags.at("length")) == 60000);
 
-    if (xsflib::testing::failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", xsflib::testing::failures);
-        return 1;
-    }
-
-    std::printf("package test passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("package");
 }

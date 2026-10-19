@@ -9,11 +9,8 @@
 
 #include "xsflib/cli/audio_out.h"
 
-#include <FLAC/stream_decoder.h>
-
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -21,11 +18,12 @@
 #include <string>
 #include <vector>
 
+#include <FLAC/stream_decoder.h>
+
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
 
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 
 namespace
 {
@@ -184,13 +182,5 @@ int main()
 
     fs::remove_all(dir);
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::fprintf(stderr, "audio out test passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("audio out");
 }

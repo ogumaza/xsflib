@@ -20,7 +20,6 @@
 
 using namespace xsflib::psf;
 using xsflib::LoadLe32;
-using xsflib::testing::failures;
 
 namespace
 {
@@ -218,7 +217,7 @@ void TestDriverBlock()
     XSFLIB_CHECK(CheckDriverBlock(block(2, 1, false), layout) ==
                  "driver block version 2; this player supports version 1");
     XSFLIB_CHECK(CheckDriverBlock(block(1, 2, false), layout) ==
-                 std::string("the driver block's output mode is 2") + OutputModeExpected());
+                 "the driver block's output mode is 2; version 1 supports only stereo (1)");
 
     // A big-endian block without an output mode.
     XSFLIB_CHECK(!CheckDriverBlock(block(1, std::nullopt, true), GameModeOnly::kDriverBlock));
@@ -397,13 +396,5 @@ int main()
     TestLoadSet();
     TestTagReaders();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("psf set tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("psf set");
 }

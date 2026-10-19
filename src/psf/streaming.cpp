@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-// The program of a format that holds each of a set's files once (see streaming.h).
+// The program of a format that holds each of a set's files once (see streaming.h). The file also holds the parts that
+// the streaming program shares with the rest of xsflib::psf: the chunk reader of both kinds of program (chunks.h), the
+// inflater of the container's decompressor (inflate.h), the writer of a PSF file in pieces, and the fields of the
+// descriptors and of the FILE chunks.
 
 #include "xsflib/psf/streaming.h"
-
-#include <zlib.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -17,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+#include <zlib.h>
+
 #include "chunks.h"
 #include "header.h"
 #include "inflate.h"
@@ -28,6 +31,9 @@ namespace xsflib::psf
 {
 namespace
 {
+
+// The chunks of a streaming program besides its FILE chunks: a SND chunk, and no MEM chunks.
+constexpr detail::ChunkKinds kStreamingChunks{.memory = false, .sound = true};
 
 // A FILE chunk's header and its path, padded to four bytes. The file's data follows them.
 std::vector<uint8_t> FileChunkHead(const std::string& path, std::size_t data_size)
@@ -177,31 +183,34 @@ private:
     std::optional<std::string> error_; // once the stream has failed, every read gives its error
 };
 
-// Splits a program into chunks as it reads it (see ParseStreamingProgram). With `memory_chunks`, MEM chunks go into
-// `out.memory`. With `sound_chunks`, a SND chunk sets `out.sound`. Other chunks are skipped.
-std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out, bool memory_chunks, bool sound_chunks)
+// The reads inside a chunk, where the program's end is an error.
+class ChunkReader
 {
+public:
+    explicit ChunkReader(ProgramSource& source) : source_(source)
+    {
+    }
+
     // Reads exactly `n` bytes of a chunk.
-    const auto read_all = [&source](uint8_t* dest, std::size_t n) -> std::optional<std::string>
+    std::optional<std::string> ReadAll(uint8_t* dest, std::size_t n)
     {
         std::size_t got = 0;
-        if (auto err = source.Read(dest, n, got))
+        if (auto err = source_.Read(dest, n, got))
         {
             return err;
         }
 
         return got < n ? std::optional<std::string>("truncated chunk") : std::nullopt;
-    };
+    }
 
     // Reads and drops `n` bytes of a chunk.
-    std::vector<uint8_t> scratch;
-    const auto skip = [&](uint64_t n) -> std::optional<std::string>
+    std::optional<std::string> Skip(uint64_t n)
     {
-        scratch.resize(static_cast<std::size_t>(std::min<uint64_t>(n, 0x10000)));
+        scratch_.resize(static_cast<std::size_t>(std::min<uint64_t>(n, 0x10000)));
         while (n > 0)
         {
-            const auto part = static_cast<std::size_t>(std::min<uint64_t>(n, scratch.size()));
-            if (auto err = read_all(scratch.data(), part))
+            const auto part = static_cast<std::size_t>(std::min<uint64_t>(n, scratch_.size()));
+            if (auto err = ReadAll(scratch_.data(), part))
             {
                 return err;
             }
@@ -210,8 +219,142 @@ std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out
         }
 
         return std::nullopt;
-    };
+    }
 
+    // Reads and drops the last `n` bytes of a chunk with a bad header. Returns `error`, or the read's error. A chunk
+    // that the program's end cuts short is then reported as truncated, whatever its header.
+    std::string Reject(uint64_t n, const char* error)
+    {
+        return Skip(n).value_or(error);
+    }
+
+private:
+    ProgramSource& source_;
+    std::vector<uint8_t> scratch_;
+};
+
+// Reads a MEM chunk of `size` bytes after its header into `out.memory`: the address, then the data.
+std::optional<std::string> ReadMemChunk(ChunkReader& reader, uint32_t size, ProgramChunks& out)
+{
+    if (size < 4)
+    {
+        return reader.Reject(size, "bad MEM chunk");
+    }
+
+    uint8_t address[4];
+    if (auto err = reader.ReadAll(address, sizeof(address)))
+    {
+        return err;
+    }
+
+    MemChunk memory;
+    memory.address = LoadLe32(address);
+    memory.data.resize(size - 4);
+    if (auto err = reader.ReadAll(memory.data.data(), memory.data.size()))
+    {
+        return err;
+    }
+
+    out.memory.push_back(std::move(memory));
+
+    return std::nullopt;
+}
+
+// Reads a FILE chunk of `size` bytes after its header into `out.files`: the path's length, the path, the padding to
+// four bytes, then the data.
+std::optional<std::string> ReadFileChunk(ChunkReader& reader, uint32_t size, ProgramChunks& out)
+{
+    if (size < 2)
+    {
+        return reader.Reject(size, "bad FILE chunk");
+    }
+
+    uint8_t length[2];
+    if (auto err = reader.ReadAll(length, sizeof(length)))
+    {
+        return err;
+    }
+
+    const uint32_t len = LoadLe16(length);
+    const uint32_t data_start = (2 + len + 3) & ~3u;
+    if (data_start > size)
+    {
+        return reader.Reject(size - 2, "bad FILE chunk");
+    }
+
+    FileChunk file;
+    file.path.resize(len);
+    file.data.resize(size - data_start);
+    if (auto err = reader.ReadAll(reinterpret_cast<uint8_t*>(file.path.data()), len))
+    {
+        return err;
+    }
+    if (auto err = reader.Skip(data_start - 2 - len))
+    {
+        return err;
+    }
+    if (auto err = reader.ReadAll(file.data.data(), file.data.size()))
+    {
+        return err;
+    }
+
+    out.files.push_back(std::move(file));
+
+    return std::nullopt;
+}
+
+// Reads a SND chunk of `size` bytes after its header: the sound's number goes into `out.sound`, and any bytes after it
+// are skipped.
+std::optional<std::string> ReadSoundChunk(ChunkReader& reader, uint32_t size, ProgramChunks& out)
+{
+    if (size < 4)
+    {
+        return reader.Reject(size, "bad SND chunk");
+    }
+
+    uint8_t word[4];
+    if (auto err = reader.ReadAll(word, sizeof(word)))
+    {
+        return err;
+    }
+    if (auto err = reader.Skip(size - 4))
+    {
+        return err;
+    }
+
+    out.sound = LoadLe32(word);
+
+    return std::nullopt;
+}
+
+// Reads a chunk of `size` bytes after its header into `out` when it's a FILE chunk or of a kind that `kinds` takes.
+// Skips any other chunk.
+std::optional<std::string> ReadChunk(ChunkReader& reader, const uint8_t* header, uint32_t size,
+                                     detail::ChunkKinds kinds, ProgramChunks& out)
+{
+    if (kinds.memory && std::memcmp(header, "MEM ", 4) == 0)
+    {
+        return ReadMemChunk(reader, size, out);
+    }
+
+    if (std::memcmp(header, "FILE", 4) == 0)
+    {
+        return ReadFileChunk(reader, size, out);
+    }
+
+    if (kinds.sound && std::memcmp(header, "SND ", 4) == 0)
+    {
+        return ReadSoundChunk(reader, size, out);
+    }
+
+    return reader.Skip(size);
+}
+
+// Splits a program into chunks as it reads it (see ParseStreamingProgram): the FILE chunks, and those that `kinds`
+// takes. The program may end after any chunk, and in the padding after it.
+std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out, detail::ChunkKinds kinds)
+{
+    ChunkReader reader(source);
     while (true)
     {
         uint8_t header[8];
@@ -233,89 +376,7 @@ std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out
             return "truncated chunk";
         }
 
-        // A chunk with a bad header is read to its end first. That way, a chunk that the program's end cuts short is
-        // reported as truncated.
-        if (memory_chunks && std::memcmp(header, "MEM ", 4) == 0)
-        {
-            if (size < 4)
-            {
-                return skip(size).value_or("bad MEM chunk");
-            }
-
-            uint8_t address[4];
-            if (auto err = read_all(address, sizeof(address)))
-            {
-                return err;
-            }
-
-            MemChunk memory;
-            memory.address = LoadLe32(address);
-            memory.data.resize(size - 4);
-            if (auto err = read_all(memory.data.data(), memory.data.size()))
-            {
-                return err;
-            }
-
-            out.memory.push_back(std::move(memory));
-        }
-        else if (std::memcmp(header, "FILE", 4) == 0)
-        {
-            if (size < 2)
-            {
-                return skip(size).value_or("bad FILE chunk");
-            }
-
-            uint8_t length[2];
-            if (auto err = read_all(length, sizeof(length)))
-            {
-                return err;
-            }
-
-            const uint32_t len = LoadLe16(length);
-            const uint32_t data_start = (2 + len + 3) & ~3u;
-            if (data_start > size)
-            {
-                return skip(size - 2).value_or("bad FILE chunk");
-            }
-
-            FileChunk file;
-            file.path.resize(len);
-            file.data.resize(size - data_start);
-            if (auto err = read_all(reinterpret_cast<uint8_t*>(file.path.data()), len))
-            {
-                return err;
-            }
-            if (auto err = skip(data_start - 2 - len))
-            {
-                return err;
-            }
-            if (auto err = read_all(file.data.data(), file.data.size()))
-            {
-                return err;
-            }
-
-            out.files.push_back(std::move(file));
-        }
-        else if (sound_chunks && std::memcmp(header, "SND ", 4) == 0)
-        {
-            if (size < 4)
-            {
-                return skip(size).value_or("bad SND chunk");
-            }
-
-            uint8_t word[4];
-            if (auto err = read_all(word, sizeof(word)))
-            {
-                return err;
-            }
-            if (auto err = skip(size - 4))
-            {
-                return err;
-            }
-
-            out.sound = LoadLe32(word);
-        }
-        else if (auto err = skip(size))
+        if (auto err = ReadChunk(reader, header, size, kinds, out))
         {
             return err;
         }
@@ -337,10 +398,10 @@ std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out
 } // namespace
 
 std::optional<std::string> detail::ParseChunks(const std::vector<uint8_t>& program, ProgramChunks& out,
-                                               bool memory_chunks, bool sound_chunks)
+                                               ChunkKinds kinds)
 {
     MemorySource source(program);
-    return SplitChunks(source, out, memory_chunks, sound_chunks);
+    return SplitChunks(source, out, kinds);
 }
 
 std::optional<std::string> detail::InflateWhole(const uint8_t* compressed, uint32_t size, std::vector<uint8_t>& program)
@@ -367,7 +428,7 @@ void Put16(std::vector<uint8_t>& v, uint32_t x)
     v.push_back(static_cast<uint8_t>(x >> 8));
 }
 
-// A path in a descriptor: its u16 length, then its bytes.
+// A path in a descriptor or a FILE chunk: its u16 length, then its bytes.
 void PutPath(std::vector<uint8_t>& v, const std::string& path)
 {
     Put16(v, static_cast<uint32_t>(path.size()));
@@ -535,7 +596,7 @@ std::vector<uint8_t> StreamingProgramBuilder::WritePsf(uint8_t version, const st
 
 std::optional<std::string> ParseStreamingProgram(const std::vector<uint8_t>& program, ProgramChunks& out)
 {
-    return detail::ParseChunks(program, out, false, true);
+    return detail::ParseChunks(program, out, kStreamingChunks);
 }
 
 std::optional<std::string> ParsePsfChunks(const std::vector<uint8_t>& data, ProgramChunks& out)
@@ -566,7 +627,7 @@ std::optional<std::string> ParsePsfChunks(const std::vector<uint8_t>& data, Prog
 
     // An error in the zlib stream comes first. The same happens when the program is inflated whole before it's split.
     InflateSource source(compressed, program_size);
-    const auto err = SplitChunks(source, out, false, true);
+    const auto err = SplitChunks(source, out, kStreamingChunks);
     if (err)
     {
         if (auto stream_err = source.Drain())

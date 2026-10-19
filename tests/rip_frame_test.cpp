@@ -18,8 +18,6 @@
 #include "xsflib/cli/rip.h"
 #include "xsflib/testing/check.h"
 
-using xsflib::testing::failures;
-
 namespace
 {
 
@@ -378,13 +376,5 @@ int main()
     TestAnalyzeAndWrite();
     TestAnalysisSettings();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("rip frame tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("rip frame");
 }

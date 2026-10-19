@@ -5,7 +5,6 @@
 // limit, a steady sequence, ringing effects, a failing frame, and the rules that differ between models.
 
 #include <cstdint>
-#include <cstdio>
 #include <functional>
 #include <new>
 #include <optional>
@@ -465,12 +464,5 @@ int main()
     TestRinging();
     TestFailures();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-
-        return 1;
-    }
-
-    return 0;
+    return xsflib::testing::Summary("rip length");
 }

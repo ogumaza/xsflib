@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -152,13 +151,5 @@ int main()
 
     TestArchiveFields();
 
-    if (xsflib::testing::failures != 0)
-    {
-        std::fprintf(stderr, "%d checks failed\n", xsflib::testing::failures);
-        return 1;
-    }
-
-    std::printf("psf_descriptor_test: all checks passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("psf descriptor");
 }

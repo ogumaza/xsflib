@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <span>
 #include <string>
 #include <vector>
@@ -16,7 +15,6 @@
 #include "xsflib/testing/check.h"
 
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 
 namespace
 {
@@ -55,12 +53,5 @@ int main()
         Check(sha1.Finish() == whole, "pieces of " + std::to_string(piece) + " bytes");
     }
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-
-        return 1;
-    }
-
-    return 0;
+    return xsflib::testing::Summary("sha1");
 }

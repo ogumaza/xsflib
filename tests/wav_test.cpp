@@ -7,15 +7,15 @@
 #include "xsflib/wav.h"
 
 #include <cstdint>
-#include <cstdio>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "seqlib/wav.h"
+
 #include "xsflib/testing/check.h"
 
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 
 int main()
 {
@@ -31,17 +31,11 @@ int main()
 
     Check(std::string(stereo.begin(), stereo.end()) == kExpected, "a WAV file of two stereo frames");
 
-    // Mono files, against seqlib's writer.
+    // Mono files, against seqlib's writer. seqlib::WavFile also takes a seqlib::Pcm. A named span picks the overload
+    // that takes samples, as xsflib::WavFile does.
     Check(xsflib::WavFile(kSamples, 1, 32000) == seqlib::WavFile(kSamples, 32000), "four mono samples match seqlib");
-    Check(xsflib::WavFile({}, 1, 22050) == seqlib::WavFile({}, 22050), "an empty file matches seqlib");
+    const std::span<const int16_t> kNoSamples;
+    Check(xsflib::WavFile(kNoSamples, 1, 22050) == seqlib::WavFile(kNoSamples, 22050), "an empty file matches seqlib");
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("wav tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("wav");
 }

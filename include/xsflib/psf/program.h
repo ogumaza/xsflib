@@ -109,9 +109,4 @@ struct DriverBlockLayout
 // the block (no magic at its address) passes: it doesn't use the format's driver.
 std::optional<std::string> CheckDriverBlock(const std::vector<MemChunk>& memory, const DriverBlockLayout& layout);
 
-// Diagnostic suffixes for unsupported descriptor flags and output modes, in the formats whose version 1 requires the
-// flag "DSP required" (bit 0) and plays stereo only.
-const char* FlagsExpected();
-const char* OutputModeExpected();
-
 } // namespace xsflib::psf

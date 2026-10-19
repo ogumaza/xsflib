@@ -3,7 +3,7 @@
 // The program of a format that holds each of a set's files once. The program is built from pieces. Some pieces are the
 // files themselves. The pieces are compressed as they come. A PSF file's program is read straight into its chunks, and
 // inflated as it's read. A large file is then never held twice. The chunks are FILE and SND chunks, laid out as in
-// program.h. The descriptors' paths are a 16-bit length and the path's bytes.
+// program.h. A path in a FILE chunk or in a descriptor is a 16-bit length and the path's bytes.
 
 #pragma once
 
@@ -69,8 +69,8 @@ std::optional<std::string> ParsePsfChunks(const std::vector<uint8_t>& data, Prog
 // Splits a decompressed program into chunks as ParsePsfChunks does: FILE and SND chunks, with others skipped.
 std::optional<std::string> ParseStreamingProgram(const std::vector<uint8_t>& program, ProgramChunks& out);
 
-// The descriptors' fields: a 16-bit little-endian value, a path (its 16-bit length, then its bytes), and zeros to a
-// multiple of four bytes.
+// The fields of the descriptors and of the FILE chunks in both kinds of program: a 16-bit little-endian value, a path
+// (its 16-bit length, then its bytes), and zeros to a multiple of four bytes.
 void Put16(std::vector<uint8_t>& v, uint32_t x);
 void PutPath(std::vector<uint8_t>& v, const std::string& path);
 void PadTo4(std::vector<uint8_t>& v);

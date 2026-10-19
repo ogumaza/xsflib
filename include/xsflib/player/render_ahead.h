@@ -9,7 +9,7 @@
 // one core busy until it reaches the end of the track or the buffer limit. Buffered audio uses about 7.3 MiB per minute
 // at 32,000 Hz.
 //
-// A foobar2000 component reads the buffer on its decoding thread.
+// A foobar2000 component or an XMPlay plugin reads the buffer on its decoding thread.
 
 #pragma once
 

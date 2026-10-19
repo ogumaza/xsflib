@@ -108,9 +108,97 @@ struct LoadedSet
 namespace detail
 {
 
+// Reads the chunks of the file at `path` into `chunks`. `data` is the file, and `psf` is its container. A streaming
+// format reads them straight from the compressed program. A copying format splits the decompressed program.
+template <typename Format>
+std::optional<std::string> ReadChunks(const std::string& path, const std::vector<uint8_t>& data, const PsfFile& psf,
+                                      ProgramChunks& chunks)
+{
+    if constexpr (kStreaming<Format>)
+    {
+        if (auto err = ParsePsfChunks(data, chunks))
+        {
+            return path + ": " + *err;
+        }
+    }
+    else
+    {
+        // A format without archive mode skips SND chunks.
+        if (auto err = ParseProgram(psf.program, chunks, ProgramOptions{.sound_chunks = kHasArchiveMode<Format>}))
+        {
+            return path + ": " + *err;
+        }
+    }
+
+    return std::nullopt;
+}
+
+// Adds a file's chunks to the set, after those of the files loaded before it. A file that selects a sound replaces the
+// set's sound.
+template <typename Format>
+void AddChunks(ProgramChunks& chunks, LoadedSet<Format>& out)
+{
+    for (auto& m : chunks.memory)
+    {
+        out.memory.push_back(std::move(m));
+    }
+
+    for (auto& f : chunks.files)
+    {
+        out.files.push_back(std::move(f));
+    }
+
+    if (chunks.sound)
+    {
+        out.sound = chunks.sound;
+    }
+}
+
+// Takes the descriptor in `reserved` as the set's mode. `reserved` is the reserved area of the file at `path`. The last
+// descriptor in loading order sets the mode. A file that holds neither descriptor leaves the mode as it is. Returns an
+// error when the descriptor fails its check.
+template <typename Format>
+std::optional<std::string> TakeDescriptor(const std::string& path, const std::vector<uint8_t>& reserved,
+                                          LoadedSet<Format>& out)
+{
+    bool game = false;
+    if constexpr (kHasGameMode<Format>)
+    {
+        if (auto d = Format::ProcessDescriptor::Parse(reserved))
+        {
+            if (auto err = d->Check())
+            {
+                return path + ": " + *err;
+            }
+
+            out.descriptor = d;
+            out.archive.reset();
+            game = true;
+        }
+    }
+
+    if constexpr (kHasArchiveMode<Format>)
+    {
+        if (auto a = game ? std::nullopt : Format::ArchiveDescriptor::Parse(reserved))
+        {
+            if (auto err = a->Check())
+            {
+                return path + ": " + *err;
+            }
+
+            out.archive = a;
+            out.descriptor.reset();
+        }
+    }
+
+    return std::nullopt;
+}
+
+// Loads the file at `path` into `out`: first its _lib, then the file itself, then its _lib2 and on. `depth` counts the
+// library tags that led to the file. The file at depth 0 heads the set and gives it its tags.
 template <typename Format>
 std::optional<std::string> LoadRecursive(const std::string& path, const FileReader& reader, std::string_view separators,
-                                         LoadedSet<Format>& out, int depth, bool top)
+                                         LoadedSet<Format>& out, int depth)
 {
     if (depth > kMaxLibDepth)
     {
@@ -119,7 +207,7 @@ std::optional<std::string> LoadRecursive(const std::string& path, const FileRead
 
     if (out.sources.size() >= kMaxSetFiles)
     {
-        return "more than 64 files in the set";
+        return "more than " + std::to_string(kMaxSetFiles) + " files in the set";
     }
 
     std::vector<uint8_t> data;
@@ -144,73 +232,23 @@ std::optional<std::string> LoadRecursive(const std::string& path, const FileRead
     auto lib = psf.tags.find("_lib");
     if (lib != psf.tags.end() && !lib->second.empty())
     {
-        if (auto err = LoadRecursive(dir + lib->second, reader, separators, out, depth + 1, false))
+        if (auto err = LoadRecursive(dir + lib->second, reader, separators, out, depth + 1))
         {
             return err;
         }
     }
 
     ProgramChunks chunks;
-    if constexpr (kStreaming<Format>)
+    if (auto err = ReadChunks<Format>(path, data, psf, chunks))
     {
-        if (auto err = ParsePsfChunks(data, chunks))
-        {
-            return path + ": " + *err;
-        }
-    }
-    else
-    {
-        // A format without archive mode skips SND chunks.
-        if (auto err = ParseProgram(psf.program, chunks, ProgramOptions{.sound_chunks = kHasArchiveMode<Format>}))
-        {
-            return path + ": " + *err;
-        }
+        return err;
     }
 
-    for (auto& m : chunks.memory)
+    AddChunks(chunks, out);
+
+    if (auto err = TakeDescriptor(path, psf.reserved, out))
     {
-        out.memory.push_back(std::move(m));
-    }
-
-    for (auto& f : chunks.files)
-    {
-        out.files.push_back(std::move(f));
-    }
-
-    if (chunks.sound)
-    {
-        out.sound = chunks.sound;
-    }
-
-    // The last descriptor in loading order sets the mode.
-    bool game = false;
-    if constexpr (kHasGameMode<Format>)
-    {
-        if (auto d = Format::ProcessDescriptor::Parse(psf.reserved))
-        {
-            if (auto err = d->Check())
-            {
-                return path + ": " + *err;
-            }
-
-            out.descriptor = d;
-            out.archive.reset();
-            game = true;
-        }
-    }
-
-    if constexpr (kHasArchiveMode<Format>)
-    {
-        if (auto a = game ? std::nullopt : Format::ArchiveDescriptor::Parse(psf.reserved))
-        {
-            if (auto err = a->Check())
-            {
-                return path + ": " + *err;
-            }
-
-            out.archive = a;
-            out.descriptor.reset();
-        }
+        return err;
     }
 
     out.sources.push_back(path);
@@ -229,13 +267,13 @@ std::optional<std::string> LoadRecursive(const std::string& path, const FileRead
             continue;
         }
 
-        if (auto err = LoadRecursive(dir + it->second, reader, separators, out, depth + 1, false))
+        if (auto err = LoadRecursive(dir + it->second, reader, separators, out, depth + 1))
         {
             return err;
         }
     }
 
-    if (top)
+    if (depth == 0)
     {
         out.tags = psf.tags;
     }
@@ -255,7 +293,7 @@ std::optional<std::string> LoadSet(const std::string& path, const FileReader& re
 {
     out = LoadedSet<Format>{};
 
-    if (auto err = detail::LoadRecursive(path, reader, separators, out, 0, true))
+    if (auto err = detail::LoadRecursive(path, reader, separators, out, 0))
     {
         return err;
     }

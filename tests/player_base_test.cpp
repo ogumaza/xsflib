@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -16,8 +15,6 @@
 #include "xsflib/player/player.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
-
-using xsflib::testing::failures;
 
 namespace
 {
@@ -343,13 +340,5 @@ int main()
     TestBoot();
     TestSnapshots();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("player base tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("player base");
 }

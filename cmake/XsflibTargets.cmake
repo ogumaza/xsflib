@@ -2,28 +2,42 @@
 
 # How each of xsflib's libraries and tests is built.
 
-# Output must be the same on every platform. These flags go on xsflib's sources. They then hold however the library is
-# built: as part of another project, or alone for find_package. Every build computes the same floats because fused
-# multiply-add contraction is off. On CPUs with FMA, such as Apple Silicon, Clang contracts by default. MSVC's
-# /fp:precise doesn't. On 32-bit x86, floating point uses SSE2, not the x87 unit and its extra precision.
+# Sets `variable` to the options that make every build compute the same floats. Fused multiply-add contraction is off.
+# On CPUs with FMA, such as Apple Silicon, Clang contracts by default. MSVC's /fp:precise doesn't. On 32-bit x86,
+# floating point uses SSE2, not the x87 unit and its extra precision. clang-cl takes MSVC's options but is Clang
+# underneath. It takes Clang's settings through /clang:. MSVC's cl.exe does neither by default and gets no options.
+# xsflib_set_flags and both modes of xsflib_project use them.
+function(xsflib_float_options variable)
+    set(options "")
+    if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list(APPEND options /clang:-ffp-contract=off)
+        if (CMAKE_SIZEOF_VOID_P EQUAL 4)
+            list(APPEND options /arch:SSE2)
+        endif()
+    elseif (NOT MSVC)
+        list(APPEND options -ffp-contract=off)
+        if (CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i.86|x86|x86_64|AMD64)$")
+            list(APPEND options -msse2 -mfpmath=sse)
+        endif()
+    endif()
+
+    set(${variable} ${options} PARENT_SCOPE)
+endfunction()
+
+# Output must be the same on every platform. These flags go on xsflib's sources: the warnings and the float options
+# (xsflib_float_options). They then hold however the library is built: as part of another project, or alone for
+# find_package.
 function(xsflib_set_flags target)
     if (MSVC)
         target_compile_options(${target} PRIVATE /W4 /utf-8)
         # fopen and freopen are standard C++. The _s versions that MSVC suggests instead aren't portable.
         target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            # clang-cl takes MSVC's options but is Clang underneath. It takes Clang's settings through /clang:.
-            target_compile_options(${target} PRIVATE /clang:-ffp-contract=off)
-            if (CMAKE_SIZEOF_VOID_P EQUAL 4)
-                target_compile_options(${target} PRIVATE /arch:SSE2)
-            endif()
-        endif()
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -ffp-contract=off)
-        if (CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i.86|x86|x86_64|AMD64)$")
-            target_compile_options(${target} PRIVATE -msse2 -mfpmath=sse)
-        endif()
+        target_compile_options(${target} PRIVATE -Wall -Wextra)
     endif()
+
+    xsflib_float_options(float_options)
+    target_compile_options(${target} PRIVATE ${float_options})
 
     # Windows: bzip2's header includes windows.h. Unless NOMINMAX is defined, windows.h defines min and max as macros.
     # Those macros break std::min, std::max and std::numeric_limits::max.
@@ -32,16 +46,13 @@ function(xsflib_set_flags target)
     endif()
 
     # __FILE__ gives paths relative to the project's folders when the project (xsflib or a library that builds on it)
-    # is built alone. A project that includes it sets the mapping for its build.
+    # is built alone. A project that includes it sets the mapping for its build. MSVC's cl.exe isn't supported and gets
+    # no mapping.
     if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             target_compile_options(${target} PRIVATE "/clang:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/="
                                                      "/clang:-fmacro-prefix-map=${PROJECT_BINARY_DIR}/=")
-        elseif (MSVC)
-            cmake_path(NATIVE_PATH PROJECT_SOURCE_DIR source_dir)
-            cmake_path(NATIVE_PATH PROJECT_BINARY_DIR binary_dir)
-            target_compile_options(${target} PRIVATE /d1trimfile:${source_dir} /d1trimfile:${binary_dir})
-        else()
+        elseif (NOT MSVC)
             target_compile_options(${target} PRIVATE -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=
                                                      -fmacro-prefix-map=${PROJECT_BINARY_DIR}/=)
         endif()

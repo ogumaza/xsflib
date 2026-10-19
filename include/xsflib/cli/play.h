@@ -3,13 +3,10 @@
 // The frame of a format's play tool: it renders each file to WAV or FLAC at the player's rate.
 //
 // usage: <tool> [options] <file> [<file> ...]
-//   -o, --output FILE  the output file, WAV or FLAC by its extension (default: the input's name with .wav, in the same
-//                      folder). Only valid with a single input.
-//   --length T         override the length tag (seconds, m:s or h:m:s)
-//   --fade T           override the fade tag
-//   --default T        the length when there's no length tag (default and fade: PlaybackOptions)
-//   --info             print the tags and loaded files without rendering
-//   --version          print the version
+//
+// PrintUsage gives the options: the output file of a single input (-o), the times in place of the tags (--length,
+// --fade and --default), --info, --version and --help. Without -o, the tool renders each file to a WAV file beside it,
+// with .wav in place of the file's extension.
 //
 // The files are rendered one after another. A file that fails doesn't stop the rest. A library among the inputs is
 // skipped. The other files load it. Files dropped on the program become inputs.
@@ -19,15 +16,12 @@
 
 #pragma once
 
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
 #include <filesystem>
 #include <functional>
-#include <set>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -358,54 +352,27 @@ int Run(const PlayTool<Player>& tool, int argc, char** argv)
         tool.before_inputs();
     }
 
-    // Render each input once and continue after errors. Return the highest exit code.
-    std::set<fs::path> done;
-    int result = 0;
-    for (std::size_t i = 0; i < inputs.size(); i++)
+    // Renders one input. A folder fails. A library is skipped: the minis load it. An input whose canonical path can't
+    // be found counts by its absolute path.
+    const auto render = [&](const std::string& in)
     {
-        const std::string& in = inputs[i];
-        if (inputs.size() > 1)
-        {
-            // For a folder given with a slash at the end, print the folder's name.
-            const fs::path path = fs::absolute(in).lexically_normal();
-            const fs::path name = path.has_filename() ? path.filename() : path.parent_path().filename();
-            std::fprintf(stderr, "%s%s:\n", i ? "\n" : "", name.string().c_str());
-        }
-
         std::error_code ec;
-        const fs::path canonical = fs::weakly_canonical(in, ec);
-        if (!done.insert(ec ? fs::absolute(in) : canonical).second)
-        {
-            std::fprintf(stderr, "skipped duplicate input\n");
-            continue;
-        }
-
         if (fs::is_directory(in, ec))
         {
             std::fprintf(stderr, "error: %s is a folder, not %s\n", in.c_str(), tool.a_file.c_str());
-            result = std::max(result, 1);
-            continue;
+            return 1;
         }
 
         if (AsciiLower(fs::path(in).extension().string()) == tool.library_extension)
         {
             std::fprintf(stderr, "skipped %s: a library that %s files load\n", in.c_str(), tool.mini_extension.c_str());
-            continue;
+            return 0;
         }
 
         const fs::path out = o.out.empty() ? fs::path(in).replace_extension(".wav") : fs::path(o.out);
-        try
-        {
-            result = std::max(result, Render(tool, in, out, o));
-        }
-        catch (const std::exception& e)
-        {
-            std::fprintf(stderr, "error: %s: %s\n", in.c_str(), e.what());
-            result = std::max(result, 1);
-        }
-    }
-
-    return result;
+        return Render(tool, in, out, o);
+    };
+    return RunEachInput(inputs, [](const std::string& in) { return fs::absolute(in); }, render);
 }
 
 } // namespace detail

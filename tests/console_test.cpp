@@ -12,8 +12,6 @@
 
 #include "xsflib/testing/check.h"
 
-using xsflib::testing::failures;
-
 int main(int argc, char** argv)
 {
     const std::vector<std::string> args = xsflib::console::Arguments(argc, argv);
@@ -27,13 +25,5 @@ int main(int argc, char** argv)
     xsflib::console::UseUtf8Output(true);
     xsflib::console::WaitInOwnWindow(stderr, "\nPress Enter to close this window.");
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("console tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("console");
 }

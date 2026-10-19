@@ -3,11 +3,8 @@
 // Tests of the program of a format that holds each of a set's files once (streaming.h), and of loading a set of such a
 // format (set.h).
 
-#include <zlib.h>
-
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <map>
 #include <optional>
@@ -15,6 +12,8 @@
 #include <span>
 #include <string>
 #include <vector>
+
+#include <zlib.h>
 
 #include "xsflib/bytes.h"
 #include "xsflib/psf/program.h"
@@ -449,13 +448,5 @@ int main()
     TestStreamedChunks();
     TestStreamingSets();
 
-    if (failures != 0)
-    {
-        std::fprintf(stderr, "%d checks failed\n", failures);
-        return 1;
-    }
-
-    std::printf("psf streaming tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("psf streaming");
 }

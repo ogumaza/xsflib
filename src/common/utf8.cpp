@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// UTF-8 in the names that files hold (see utf8.h).
+// UTF-8 in the names and tags that files hold (see utf8.h).
 
 #include "xsflib/utf8.h"
 
@@ -52,6 +52,22 @@ std::pair<uint32_t, std::size_t> Utf8Character(std::string_view s)
     }
 
     return {c, length};
+}
+
+bool IsUtf8(std::string_view text)
+{
+    while (!text.empty())
+    {
+        const std::size_t length = Utf8Character(text).second;
+        if (length == 0)
+        {
+            return false;
+        }
+
+        text.remove_prefix(length);
+    }
+
+    return true;
 }
 
 bool IsPrintable(uint32_t c)

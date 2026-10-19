@@ -117,6 +117,10 @@ long long TagTimeMs(const Tags& tags, const std::string& name);
 // The volume tag's factor, or 1.0 without one.
 double TagVolume(const Tags& tags);
 
+// Whether `name` is one of the PSF tags that aren't metadata: the libraries (_lib, _lib2 and on), length, fade, volume
+// and utf8.
+bool IsSystemTag(std::string_view name);
+
 // The sequence variables that a format's variables tag (such as xyz_var) sets before a sequence starts, by number: 0 to
 // 15 are the sound's player variables, and 16 to 31 the global ones.
 using Variables = std::map<int, int16_t>;

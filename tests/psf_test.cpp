@@ -5,8 +5,6 @@
 
 #include "xsflib/psf/psf.h"
 
-#include <zlib.h>
-
 #include <algorithm>
 #include <clocale>
 #include <cmath>
@@ -20,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include <zlib.h>
+
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
 
@@ -27,7 +27,6 @@ using namespace xsflib::psf;
 using xsflib::LoadLe32;
 using xsflib::StoreLe32;
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 
 // A version byte for the files that the tests write. Any value works.
 constexpr uint8_t kVersion = 0x27;
@@ -297,13 +296,5 @@ int main()
     TestParseOptions();
     TestVariables();
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("psf tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("psf");
 }

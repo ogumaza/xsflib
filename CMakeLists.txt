@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
-project(xsflib VERSION 1.2.0 LANGUAGES C CXX)
+project(xsflib VERSION 1.3.0 LANGUAGES C CXX)
 
 # CMake 3.20 has no PROJECT_IS_TOP_LEVEL. xsflib is the top-level project when the build starts in its folder.
 if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -45,11 +45,14 @@ endif()
 xsflib_add_test(channel_log)
 
 # The common files: byte order, bounds-checked reads, ASCII, UTF-8 names, numbers as text, files and their UTF-8
-# paths, WAV files, SHA-1 and memory images.
-xsflib_add_library(common src/common/files.cpp src/common/sha1.cpp src/common/text.cpp src/common/utf8.cpp)
+# paths, WAV files, SHA-1, SHA-256 and memory images.
+xsflib_add_library(common src/common/files.cpp src/common/sha1.cpp src/common/sha256.cpp src/common/text.cpp
+                   src/common/utf8.cpp)
 xsflib_add_test(binary xsflib::common)
 xsflib_add_test(files xsflib::common)
 xsflib_add_test(sha1 xsflib::common)
+xsflib_add_test(sha256 xsflib::common)
+xsflib_add_test(samples_sha256 xsflib::common)
 xsflib_add_test(snapshot xsflib::common)
 xsflib_add_test(wav xsflib::common seqlib::seqlib)
 
@@ -106,6 +109,11 @@ xsflib_add_library(rip src/rip/file_names.cpp src/rip/length.cpp src/rip/tool.cp
 target_link_libraries(xsflib_rip PUBLIC xsflib::common)
 xsflib_add_test(file_names xsflib::rip)
 xsflib_add_test(rip_length xsflib::rip)
+
+# Tests that use locally supplied files, from a local_tests.cmake in a folder of the source tree.
+if (XSFLIB_TOP_LEVEL AND XSFLIB_TESTS)
+    xsflib_include_local_tests()
+endif()
 
 if (XSFLIB_INSTALL)
     include(XsflibInstall)

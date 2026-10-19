@@ -37,28 +37,30 @@ function(xsflib_make_global target)
 endfunction()
 
 # zlib.
-if ((XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES) AND NOT TARGET ZLIB::ZLIB)
-    find_package(ZLIB QUIET)
+if (XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES)
+    if (NOT TARGET ZLIB::ZLIB)
+        find_package(ZLIB QUIET)
+    endif()
+    if (TARGET ZLIB::ZLIB)
+        xsflib_make_global(ZLIB::ZLIB)
+    else()
+        FetchContent_Declare(zlib
+            GIT_REPOSITORY https://github.com/madler/zlib.git
+            GIT_TAG v1.3.1
+            GIT_SHALLOW TRUE)
+        set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(zlib)
+        # Build only the static library. zlib's DLL would be built by default too. The DLL's resource script doesn't
+        # compile with clang-cl.
+        set_property(DIRECTORY ${zlib_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
+        target_include_directories(zlibstatic PUBLIC $<BUILD_INTERFACE:${zlib_SOURCE_DIR}>
+                                                     $<BUILD_INTERFACE:${zlib_BINARY_DIR}>)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+        list(APPEND XSFLIB_FETCHED_DEPENDENCIES zlib)
+    endif()
 endif()
-if (NOT XSFLIB_PSF AND NOT XSFLIB_DISC_LIBRARIES)
-    # Nothing requires zlib.
-elseif (TARGET ZLIB::ZLIB)
-    xsflib_make_global(ZLIB::ZLIB)
-else()
-    FetchContent_Declare(zlib
-        GIT_REPOSITORY https://github.com/madler/zlib.git
-        GIT_TAG v1.3.1
-        GIT_SHALLOW TRUE)
-    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(zlib)
-    # Build only the static library. zlib's DLL would be built by default too. The DLL's resource script doesn't compile
-    # with clang-cl.
-    set_property(DIRECTORY ${zlib_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
-    target_include_directories(zlibstatic PUBLIC $<BUILD_INTERFACE:${zlib_SOURCE_DIR}>
-                                                 $<BUILD_INTERFACE:${zlib_BINARY_DIR}>)
-    add_library(ZLIB::ZLIB ALIAS zlibstatic)
-    list(APPEND XSFLIB_FETCHED_DEPENDENCIES zlib)
-endif()
+
+# Without either option, xsflib::zlib still wraps a zlib that the parent project found.
 if (TARGET ZLIB::ZLIB)
     xsflib_add_dependency(zlib ZLIB::ZLIB)
 endif()
@@ -110,6 +112,11 @@ if (XSFLIB_DISC_LIBRARIES)
         endforeach()
         FetchContent_MakeAvailable(xz)
         set_property(DIRECTORY ${xz_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
+        # xz turns on -Wall and many more warnings for Clang. clang-cl takes -Wall as -Weverything. liblzma is then
+        # built without warnings, as libFLAC is.
+        if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(liblzma PRIVATE /w)
+        endif()
         # xz's project gives the header folder only to the library's sources. As for Zstandard, the library's users
         # get the folder here, in the build only.
         target_include_directories(liblzma INTERFACE $<BUILD_INTERFACE:${xz_SOURCE_DIR}/src/liblzma/api>)
@@ -141,7 +148,10 @@ if (XSFLIB_DISC_LIBRARIES)
             ${bzip2_SOURCE_DIR}/randtable.c
         )
         target_include_directories(xsflib_bzip2_library PUBLIC $<BUILD_INTERFACE:${bzip2_SOURCE_DIR}>)
-        if (MSVC)
+        # A project's warning options reach bzip2's sources too. WARNINGS_ON_EVERY_TARGET in xsflib_project adds /W4 to
+        # every target, for example. bzip2 1.0.8 raises warnings under them: for unused parameters and the signs of
+        # pointers, among others. xsflib can't fix them. Like liblzma and libFLAC, bzip2 is then built without warnings.
+        if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             target_compile_options(xsflib_bzip2_library PRIVATE /w)
         endif()
         xsflib_add_dependency(bzip2 xsflib_bzip2_library)
@@ -198,10 +208,19 @@ endif()
 # copy's library is built only for a target that links it. An install requires installed copies of seqlib and the
 # other libraries.
 if (NOT TARGET seqlib::seqlib)
-    if (NOT XSFLIB_INSTALL AND EXISTS ${PROJECT_SOURCE_DIR}/externals/seqlib/CMakeLists.txt)
+    if (XSFLIB_INSTALL)
+        find_package(seqlib 1.0 REQUIRED)
+    elseif (EXISTS ${PROJECT_SOURCE_DIR}/externals/seqlib/CMakeLists.txt)
         add_subdirectory(externals/seqlib EXCLUDE_FROM_ALL)
     else()
-        find_package(seqlib 1.0 REQUIRED)
+        # The copy is missing from a clone whose submodules weren't fetched recursively, such as a clone of a project
+        # that holds xsflib as a submodule. The message gives the copy's folder relative to the top-level project.
+        find_package(seqlib 1.0 QUIET)
+        if (NOT seqlib_FOUND)
+            file(RELATIVE_PATH xsflib_seqlib_folder ${CMAKE_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/externals/seqlib)
+            message(FATAL_ERROR "${xsflib_seqlib_folder} is missing, and CMake found no installed seqlib. "
+                                "Run: git submodule update --init --recursive")
+        endif()
     endif()
 endif()
 

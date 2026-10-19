@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-// UTF-8 in the names that files hold: the decoding of one character, and a name's printable form.
+// UTF-8 in the names and tags that files hold: the decoding of one character, the check of a whole text, and a name's
+// printable form.
 
 #pragma once
 
@@ -16,6 +17,9 @@ namespace xsflib
 // Decodes the first UTF-8 character in nonempty `s`. Returns its code point and byte length, or length 0 for invalid
 // UTF-8.
 std::pair<uint32_t, std::size_t> Utf8Character(std::string_view s);
+
+// Whether `text` is valid UTF-8 throughout.
+bool IsUtf8(std::string_view text);
 
 // Whether code point `c` is printable: not a control character, and not the line or paragraph separator (U+2028,
 // U+2029).

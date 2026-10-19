@@ -8,7 +8,7 @@ Each module is a static library. A project links the ones it uses.
 
 | Module | What it holds |
 |---|---|
-| `xsflib::common` | Byte order, bounds-checked reads of binary files, ASCII and UTF-8 helpers, numbers as text, files and their UTF-8 paths, WAV files, SHA-1 and memory images |
+| `xsflib::common` | Byte order, bounds-checked reads of binary files, ASCII and UTF-8 helpers, numbers as text, files and their UTF-8 paths, WAV files, SHA-1, SHA-256 and memory images |
 | `xsflib::console` | A command-line tool's console: the arguments in UTF-8 on Windows, UTF-8 or line-buffered output, and a window that waits before it closes |
 | `xsflib::psf_container` | The PSF container without zlib: the header, the tags and the times in them. A reader passes its decompressor |
 | `xsflib::psf` | The PSF container with zlib's decompressor and writer. Also the programs and sets of the formats that copy a set's files into their programs, and of the formats that hold each file once |
@@ -18,8 +18,9 @@ Each module is a static library. A project links the ones it uses.
 
 `include/xsflib/foobar2000/input.h` is a foobar2000 input component as a template on a format's traits.
 `include/xsflib/xmplay/input.h` is an XMPlay input plugin as a template on a format's traits. `xsflib::testing` holds
-checks for unit tests, a channel log, and helpers for the tests of a format's sets (`testing/sets.h`). The log records a
-sound's output and its channels. Two logs of one sound can be compared line by line.
+checks for unit tests, a channel log, the SHA-256 of a render's samples (`testing/samples_sha256.h`) and helpers for the
+tests of a format's sets (`testing/sets.h`). The channel log records a sound's output and its channels. Two logs of one
+sound can be compared line by line.
 
 `cmake/XsflibApps.cmake` builds common parts of a program: the Windows version resource, the macOS droplet apps, the
 foobar2000 component and the XMPlay plugin. A project includes `cmake/XsflibProject.cmake` from its submodule before it

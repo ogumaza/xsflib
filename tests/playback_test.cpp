@@ -8,7 +8,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -18,7 +17,6 @@
 
 using namespace xsflib::player;
 using xsflib::testing::Check;
-using xsflib::testing::failures;
 
 namespace
 {
@@ -265,13 +263,5 @@ int main()
     TestRenderAhead<RampPlayer>("without snapshots");
     TestRenderAhead<SnapshotRampPlayer>("with snapshots");
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d check(s) failed\n", failures);
-        return 1;
-    }
-
-    std::printf("playback tests passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("playback");
 }

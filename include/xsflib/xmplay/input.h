@@ -96,29 +96,6 @@ inline std::string_view FieldFromTag(std::string_view tag)
     return tag;
 }
 
-// PSF tags that aren't metadata.
-inline bool IsSystemTag(std::string_view name)
-{
-    return name.starts_with("_lib") || name == "length" || name == "fade" || name == "volume" || name == "utf8";
-}
-
-// Whether `text` is valid UTF-8.
-inline bool IsUtf8(std::string_view text)
-{
-    while (!text.empty())
-    {
-        const std::size_t length = Utf8Character(text).second;
-        if (length == 0)
-        {
-            return false;
-        }
-
-        text.remove_prefix(length);
-    }
-
-    return true;
-}
-
 // `text` in UTF-16, for Windows' functions.
 inline std::wstring Wide(std::string_view text)
 {
@@ -228,8 +205,8 @@ private:
     // Whether XMPlay leaves the tag `name` out: a PSF tag that isn't metadata, or one of the format's playback tags.
     static bool IsHiddenTag(std::string_view name)
     {
-        return detail::IsSystemTag(name) || std::any_of(Traits::kPlaybackTags.begin(), Traits::kPlaybackTags.end(),
-                                                        [name](const char* tag) { return name == tag; });
+        return psf::IsSystemTag(name) || std::any_of(Traits::kPlaybackTags.begin(), Traits::kPlaybackTags.end(),
+                                                     [name](const char* tag) { return name == tag; });
     }
 
     // The interface that GetInterface gives XMPlay.
@@ -707,7 +684,7 @@ private:
     // text that isn't valid UTF-8 is read in the system's code page.
     static std::string NativeText(const std::string& value, bool utf8)
     {
-        if (utf8 || detail::IsUtf8(value))
+        if (utf8 || IsUtf8(value))
         {
             return value;
         }

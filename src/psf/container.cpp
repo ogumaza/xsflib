@@ -270,6 +270,11 @@ double TagVolume(const Tags& tags)
     return volume && std::isfinite(volume->value) ? volume->value : 1.0;
 }
 
+bool IsSystemTag(std::string_view name)
+{
+    return name.starts_with("_lib") || name == "length" || name == "fade" || name == "volume" || name == "utf8";
+}
+
 bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& data)
 {
     // The path is narrow text. A FileReader may take paths that aren't the file system's.

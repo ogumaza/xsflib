@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Playback of a set as a finite (or endless) stream: length, fade and volume from the tags or the defaults, end
-// detection and seeking. A format's CLI renderer and foobar2000 component share it. They play a file identically.
+// detection and seeking. A format's play tool, foobar2000 component and XMPlay plugin share it. They play a file
+// identically.
 //
 // A player that can take snapshots of its emulation (HasSnapshots) seeks with them. While rendering, the playback takes
 // a snapshot every few seconds (see the player's Save). A seek goes back to the latest snapshot before the target and
@@ -54,8 +55,8 @@ struct SnapshotOf<Player>
 template <typename Player>
 struct PlaybackOptions
 {
-    // The defaults of default_length_ms and default_fade_ms. A play tool's help and the foobar2000 component's
-    // preferences show them in whole seconds.
+    // The defaults of default_length_ms and default_fade_ms. A play tool's help, a foobar2000 component's preferences
+    // and an XMPlay plugin's options page show them in whole seconds.
     static constexpr long long kDefaultLengthMs = 150000;
     static constexpr long long kDefaultFadeMs = 10000;
     static_assert(kDefaultLengthMs % 1000 == 0 && kDefaultFadeMs % 1000 == 0);
@@ -117,18 +118,7 @@ public:
     // Loads a file and its libraries, without starting the player.
     bool Open(const std::string& path, const psf::FileReader& reader, const PlaybackOptions<Player>& options = {})
     {
-        options_ = options;
-        saved_.clear();
-        latest_.reset();
-
-        if (!player_.Load(path, reader))
-        {
-            return false;
-        }
-
-        ComputeLength();
-
-        return true;
+        return OpenWith(options, [&] { return player_.Load(path, reader); });
     }
 
     // Uses an already assembled set.
@@ -136,18 +126,7 @@ public:
         requires(!std::convertible_to<Set, std::string>)
     bool Open(Set set, const PlaybackOptions<Player>& options)
     {
-        options_ = options;
-        saved_.clear();
-        latest_.reset();
-
-        if (!player_.Load(std::move(set)))
-        {
-            return false;
-        }
-
-        ComputeLength();
-
-        return true;
+        return OpenWith(options, [&] { return player_.Load(std::move(set)); });
     }
 
     // Starts (or restarts) from the beginning.
@@ -155,8 +134,7 @@ public:
     {
         position_ = 0;
         finished_at_.reset();
-        saved_.clear();
-        latest_.reset();
+        DropSnapshots();
         interval_ = std::max<uint64_t>(options_.snapshot_interval, 1);
 
         if (!player_.Start())
@@ -289,8 +267,7 @@ public:
         options_.snapshots = on;
         if (!on)
         {
-            saved_.clear();
-            latest_.reset();
+            DropSnapshots();
         }
     }
 
@@ -369,6 +346,31 @@ private:
     static uint64_t MsToFrames(long long ms)
     {
         return ms <= 0 ? 0 : static_cast<uint64_t>(ms) * kSampleRate / 1000;
+    }
+
+    // Takes `options`, drops the snapshots of the set before, and loads a set with `load`. The length then follows from
+    // the new set's tags and the options.
+    template <typename Load>
+    bool OpenWith(const PlaybackOptions<Player>& options, const Load& load)
+    {
+        options_ = options;
+        DropSnapshots();
+
+        if (!load())
+        {
+            return false;
+        }
+
+        ComputeLength();
+
+        return true;
+    }
+
+    // Drops every snapshot, the latest one included.
+    void DropSnapshots()
+    {
+        saved_.clear();
+        latest_.reset();
     }
 
     void ComputeLength()

@@ -14,7 +14,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -531,13 +530,5 @@ int main(int argc, char** argv)
     TestStopWhileBusy();
     TestRandom(rounds);
 
-    if (failures)
-    {
-        std::fprintf(stderr, "%d checks failed\n", failures);
-        return 1;
-    }
-
-    std::fprintf(stderr, "render ahead test passed\n");
-
-    return 0;
+    return xsflib::testing::Summary("render ahead");
 }
