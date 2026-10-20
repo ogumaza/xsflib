@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -180,6 +181,63 @@ void TestChunks()
     XSFLIB_CHECK(FindFile(kFiles, "z") == nullptr);
 }
 
+void TestSoundLists()
+{
+    // A SND chunk with a list selects its sounds in its order. The first one is the program's sound.
+    ProgramBuilder b;
+    b.AddSounds(std::vector<uint32_t>{7, 0x01000003, 9});
+    ProgramChunks c;
+
+    XSFLIB_CHECK(!ParseProgram(b.Data(), c));
+    XSFLIB_CHECK(c.sound == 7u && c.sounds == std::vector<uint32_t>({7, 0x01000003, 9}));
+
+    // A list of one sound is AddSound's chunk, and a program with it reads as before.
+    ProgramBuilder one;
+    one.AddSound(5);
+    ProgramBuilder list_of_one;
+    list_of_one.AddSounds(std::vector<uint32_t>{5});
+    ProgramChunks single;
+
+    XSFLIB_CHECK(one.Data() == list_of_one.Data());
+    XSFLIB_CHECK(one.Data() == std::vector<uint8_t>({'S', 'N', 'D', ' ', 4, 0, 0, 0, 5, 0, 0, 0}));
+    XSFLIB_CHECK(!ParseProgram(one.Data(), single));
+    XSFLIB_CHECK(single.sound == 5u && single.sounds == std::vector<uint32_t>({5}));
+
+    // A later SND chunk replaces the whole list, a shorter list too.
+    b.AddSound(2);
+    ProgramChunks replaced;
+
+    XSFLIB_CHECK(!ParseProgram(b.Data(), replaced));
+    XSFLIB_CHECK(replaced.sound == 2u && replaced.sounds == std::vector<uint32_t>({2}));
+
+    // A partial word at the chunk's end is skipped.
+    const std::vector<uint8_t> kPartial = {'S', 'N', 'D', ' ', 6, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0};
+    ProgramChunks partial;
+
+    XSFLIB_CHECK(!ParseProgram(kPartial, partial));
+    XSFLIB_CHECK(partial.sound == 1u && partial.sounds == std::vector<uint32_t>({1}));
+
+    // Without SND chunks, the list stays empty.
+    ProgramChunks skipped;
+
+    XSFLIB_CHECK(!ParseProgram(b.Data(), skipped, ProgramOptions{.sound_chunks = false}));
+    XSFLIB_CHECK(!skipped.sound && skipped.sounds.empty());
+
+    // A chunk selects at least one sound.
+    bool refused = false;
+    try
+    {
+        ProgramBuilder empty;
+        empty.AddSounds({});
+    }
+    catch (const std::invalid_argument&)
+    {
+        refused = true;
+    }
+
+    XSFLIB_CHECK(refused);
+}
+
 void TestLoadedMemory()
 {
     // A later MEM chunk overwrites an earlier one.
@@ -263,13 +321,32 @@ void TestLoadSet()
     LoadedSet<BothModes> set;
 
     XSFLIB_CHECK(!LoadSet("dir/song.minitst", f.Reader(), set));
-    XSFLIB_CHECK(set.archive && !set.descriptor && set.sound == 5u);
+    XSFLIB_CHECK(set.archive && !set.descriptor && set.sound == 5u && set.sounds == std::vector<uint32_t>({5}));
     XSFLIB_CHECK(set.sources == std::vector<std::string>({"dir/lib.tst", "dir/song.minitst", "dir/sub/lib2.tst"}));
     XSFLIB_CHECK(set.File("archive") && *set.File("archive") == std::vector<uint8_t>({4}));
     // The memory comes in the files' loading order. The set takes its tags from the mini file alone.
     XSFLIB_CHECK(set.memory.size() == 3 && set.memory[0].data[0] == 7 && set.memory[1].data[0] == 8 &&
                  set.memory[2].data[0] == 9);
     XSFLIB_CHECK(set.tags["title"] == "Song" && !set.tags.count("game") && !set.tags.count("unknown"));
+
+    // A file that selects sounds replaces the whole list of the files loaded before it. A mini file without a SND chunk
+    // plays its library's list.
+    ProgramBuilder listing_lib;
+    listing_lib.AddFile("archive", {1});
+    listing_lib.AddSounds(std::vector<uint32_t>{1, 2});
+    ProgramBuilder listing_mini;
+    listing_mini.AddSounds(std::vector<uint32_t>{6, 5, 4});
+    f.files["list/lib.tst"] = File<BothModes>(Reserved(kArchiveMagic), listing_lib, {});
+    f.files["list/three.minitst"] = File<BothModes>({}, listing_mini, {{"_lib", "lib.tst"}});
+    f.files["list/none.minitst"] = File<BothModes>({}, ProgramBuilder(), {{"_lib", "lib.tst"}});
+    LoadedSet<BothModes> three;
+    LoadedSet<BothModes> none;
+
+    XSFLIB_CHECK(!LoadSet("list/three.minitst", f.Reader(), three));
+    XSFLIB_CHECK(!LoadSet("list/none.minitst", f.Reader(), none));
+
+    XSFLIB_CHECK(three.sound == 6u && three.sounds == std::vector<uint32_t>({6, 5, 4}));
+    XSFLIB_CHECK(none.sound == 1u && none.sounds == std::vector<uint32_t>({1, 2}));
 
     // The sets that the loader rejects.
     f.files["dir/orphan.minitst"] = File<BothModes>({}, mini, {{"_lib", "missing.tst"}});
@@ -370,7 +447,7 @@ void TestLoadSet()
 
     XSFLIB_CHECK(LoadSet("a.gmo", g.Reader(), game_set) == "no process descriptor in a.gmo or its libraries");
     XSFLIB_CHECK(!LoadSet("b.gmo", g.Reader(), game_set));
-    XSFLIB_CHECK(game_set.descriptor && !game_set.sound);
+    XSFLIB_CHECK(game_set.descriptor && !game_set.sound && game_set.sounds.empty());
 }
 
 void TestTagReaders()
@@ -391,6 +468,7 @@ void TestTagReaders()
 int main()
 {
     TestChunks();
+    TestSoundLists();
     TestLoadedMemory();
     TestDriverBlock();
     TestLoadSet();

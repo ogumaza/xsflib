@@ -100,7 +100,12 @@ struct LoadedSet
     std::vector<FileChunk> files;
     std::optional<ProcessDescriptorOf<Format>> descriptor; // game mode
     std::optional<ArchiveDescriptorOf<Format>> archive;    // archive mode
-    std::optional<uint32_t> sound;                         // archive mode: the sound to play
+
+    // Archive mode: the sounds that the last SND chunk in loading order selects, in its order, and the first of them.
+    // A format that plays one sound takes `sound`.
+    std::optional<uint32_t> sound;
+    std::vector<uint32_t> sounds;
+
     Tags tags;
     std::vector<std::string> sources; // files loaded, in order (for diagnostics)
 };
@@ -133,8 +138,8 @@ std::optional<std::string> ReadChunks(const std::string& path, const std::vector
     return std::nullopt;
 }
 
-// Adds a file's chunks to the set, after those of the files loaded before it. A file that selects a sound replaces the
-// set's sound.
+// Adds a file's chunks to the set, after those of the files loaded before it. A file that selects sounds replaces the
+// set's sounds, the whole list.
 template <typename Format>
 void AddChunks(ProgramChunks& chunks, LoadedSet<Format>& out)
 {
@@ -151,6 +156,7 @@ void AddChunks(ProgramChunks& chunks, LoadedSet<Format>& out)
     if (chunks.sound)
     {
         out.sound = chunks.sound;
+        out.sounds = std::move(chunks.sounds);
     }
 }
 

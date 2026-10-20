@@ -33,6 +33,10 @@ public:
     // Selects the sound to play (`SND ` chunk).
     void AddSound(uint32_t sound_id);
 
+    // Selects several sounds that play together (a `SND ` chunk with a list), in the order in which a player starts
+    // them. A list of one sound gives AddSound's chunk. Throws std::invalid_argument for an empty list.
+    void AddSounds(std::span<const uint32_t> sound_ids);
+
     // The program's pieces, in order.
     std::vector<std::span<const uint8_t>> Pieces() const;
 

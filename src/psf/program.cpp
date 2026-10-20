@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -46,8 +48,23 @@ void ProgramBuilder::AddFile(const std::string& path, const std::vector<uint8_t>
 
 void ProgramBuilder::AddSound(uint32_t sound_id)
 {
+    const uint32_t sound_ids[] = {sound_id};
+    AddSounds(sound_ids);
+}
+
+void ProgramBuilder::AddSounds(std::span<const uint32_t> sound_ids)
+{
+    if (sound_ids.empty())
+    {
+        throw std::invalid_argument("a SND chunk selects at least one sound");
+    }
+
     std::vector<uint8_t> payload;
-    Put32(payload, sound_id);
+    for (const uint32_t sound_id : sound_ids)
+    {
+        Put32(payload, sound_id);
+    }
+
     Chunk("SND ", payload);
 }
 

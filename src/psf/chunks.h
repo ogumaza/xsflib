@@ -18,7 +18,7 @@ namespace xsflib::psf::detail
 struct ChunkKinds
 {
     bool memory = true; // MEM chunks go into ProgramChunks::memory
-    bool sound = true;  // a SND chunk sets ProgramChunks::sound
+    bool sound = true;  // a SND chunk sets ProgramChunks::sound and ProgramChunks::sounds
 };
 
 // Splits a decompressed program into its chunks: the FILE chunks, and those that `kinds` takes.

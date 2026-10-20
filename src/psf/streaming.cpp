@@ -303,8 +303,8 @@ std::optional<std::string> ReadFileChunk(ChunkReader& reader, uint32_t size, Pro
     return std::nullopt;
 }
 
-// Reads a SND chunk of `size` bytes after its header: the sound's number goes into `out.sound`, and any bytes after it
-// are skipped.
+// Reads a SND chunk of `size` bytes after its header. Its words go into `out.sounds`, in place of an earlier chunk's,
+// and the first of them into `out.sound`. A partial word at the end is skipped.
 std::optional<std::string> ReadSoundChunk(ChunkReader& reader, uint32_t size, ProgramChunks& out)
 {
     if (size < 4)
@@ -312,17 +312,23 @@ std::optional<std::string> ReadSoundChunk(ChunkReader& reader, uint32_t size, Pr
         return reader.Reject(size, "bad SND chunk");
     }
 
-    uint8_t word[4];
-    if (auto err = reader.ReadAll(word, sizeof(word)))
+    std::vector<uint8_t> words(size / 4 * 4);
+    if (auto err = reader.ReadAll(words.data(), words.size()))
     {
         return err;
     }
-    if (auto err = reader.Skip(size - 4))
+    if (auto err = reader.Skip(size % 4))
     {
         return err;
     }
 
-    out.sound = LoadLe32(word);
+    out.sounds.clear();
+    for (std::size_t at = 0; at < words.size(); at += 4)
+    {
+        out.sounds.push_back(LoadLe32(&words[at]));
+    }
+
+    out.sound = out.sounds.front();
 
     return std::nullopt;
 }
@@ -560,9 +566,24 @@ void StreamingProgramBuilder::AddFileRef(const std::string& path, std::span<cons
 
 void StreamingProgramBuilder::AddSound(uint32_t sound_id)
 {
+    const uint32_t sound_ids[] = {sound_id};
+    AddSounds(sound_ids);
+}
+
+void StreamingProgramBuilder::AddSounds(std::span<const uint32_t> sound_ids)
+{
+    if (sound_ids.empty())
+    {
+        throw std::invalid_argument("a SND chunk selects at least one sound");
+    }
+
     std::vector<uint8_t> chunk = {'S', 'N', 'D', ' '};
-    Put32(chunk, 4);
-    Put32(chunk, sound_id);
+    Put32(chunk, static_cast<uint32_t>(sound_ids.size() * 4));
+    for (const uint32_t sound_id : sound_ids)
+    {
+        Put32(chunk, sound_id);
+    }
+
     Hold(std::move(chunk));
 }
 

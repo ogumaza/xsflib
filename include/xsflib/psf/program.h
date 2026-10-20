@@ -2,12 +2,17 @@
 
 // The program of a format that copies a set's files into it: MEM, FILE and SND chunks. Each chunk is padded to a
 // multiple of four bytes. Also what the formats read from a set's memory: their drivers' parameter block.
+//
+// A SND chunk selects the sounds to play: one or more 32-bit little-endian words, each a sound's item id or index, in
+// the order in which a player starts them. A partial word at the chunk's end is skipped. A format that plays one sound
+// at a time takes the first word and ignores the rest.
 
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -44,6 +49,10 @@ public:
     // Selects the sound to play in archive mode (`SND ` chunk): its sound's item id or index.
     void AddSound(uint32_t sound_id);
 
+    // Selects several sounds that play together (a `SND ` chunk with a list), in the order in which a player starts
+    // them. A list of one sound gives AddSound's chunk. Throws std::invalid_argument for an empty list.
+    void AddSounds(std::span<const uint32_t> sound_ids);
+
     const std::vector<uint8_t>& Data() const
     {
         return program_;
@@ -55,12 +64,14 @@ private:
     std::vector<uint8_t> program_;
 };
 
-// A decompressed program split into chunks.
+// A decompressed program split into chunks. The last `SND ` chunk gives `sound`, the first sound of its list, and
+// `sounds`, the whole list. A format that plays one sound takes `sound`.
 struct ProgramChunks
 {
     std::vector<MemChunk> memory;
     std::vector<FileChunk> files;
-    std::optional<uint32_t> sound; // the last `SND ` chunk
+    std::optional<uint32_t> sound;
+    std::vector<uint32_t> sounds;
 };
 
 // How ParseProgram reads a program.

@@ -103,6 +103,27 @@ void TestChunks()
     XSFLIB_CHECK(ParseStreamingProgram(kHuge, bad).has_value());
     XSFLIB_CHECK(ParseStreamingProgram(kLongPath, bad).has_value());
     XSFLIB_CHECK(ParseStreamingProgram(kShortSound, bad).has_value());
+
+    // A SND chunk with a list selects its sounds in its order, and a later chunk replaces the list. A list of one sound
+    // is AddSound's chunk.
+    StreamingProgramBuilder listing;
+    listing.AddSounds(std::vector<uint32_t>{0x01000009, 0x01000002, 0x01000004});
+    StreamingProgramBuilder one;
+    one.AddSound(0x01000002);
+    StreamingProgramBuilder list_of_one;
+    list_of_one.AddSounds(std::vector<uint32_t>{0x01000002});
+    ProgramChunks listed;
+
+    XSFLIB_CHECK(!ParseStreamingProgram(listing.Data(), listed));
+    XSFLIB_CHECK(listed.sound == 0x01000009u &&
+                 listed.sounds == (std::vector<uint32_t>{0x01000009, 0x01000002, 0x01000004}));
+    XSFLIB_CHECK(one.Data() == list_of_one.Data());
+
+    listing.AddSound(3);
+    ProgramChunks replaced;
+
+    XSFLIB_CHECK(!ParseStreamingProgram(listing.Data(), replaced));
+    XSFLIB_CHECK(replaced.sound == 3u && replaced.sounds == std::vector<uint32_t>{3});
 }
 
 void TestProgramPieces()
@@ -186,7 +207,8 @@ struct ChunksRead
 
 bool SameChunks(const ChunksRead& a, const ChunksRead& b)
 {
-    if (a.error != b.error || a.chunks.sound != b.chunks.sound || a.chunks.files.size() != b.chunks.files.size())
+    if (a.error != b.error || a.chunks.sound != b.chunks.sound || a.chunks.sounds != b.chunks.sounds ||
+        a.chunks.files.size() != b.chunks.files.size())
     {
         return false;
     }
@@ -240,7 +262,17 @@ std::vector<uint8_t> RandomProgram(std::mt19937& rng)
             byte = static_cast<uint8_t>(rng() % 7);
         }
 
-        if (rng() % 4 == 0)
+        if (rng() % 8 == 0)
+        {
+            std::vector<uint32_t> sounds(1 + rng() % 5);
+            for (uint32_t& sound : sounds)
+            {
+                sound = static_cast<uint32_t>(rng());
+            }
+
+            b.AddSounds(sounds);
+        }
+        else if (rng() % 4 == 0)
         {
             b.AddSound(static_cast<uint32_t>(rng()));
         }
@@ -287,6 +319,9 @@ void TestStreamedChunks()
         {'S', 'N', 'D', ' ', 2, 0, 0, 0, 1, 2, 0, 0},
         {'S', 'N', 'D', ' ', 5, 0, 0, 0, 1, 2, 3, 4, 5},
         {'S', 'N', 'D', ' ', 4, 0, 0, 0, 1, 2, 3, 4, 7, 7, 7},
+        {'S', 'N', 'D', ' ', 8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8},
+        {'S', 'N', 'D', ' ', 10, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+        {'S', 'N', 'D', ' ', 12, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8},
     };
 
     for (std::size_t i = 0; i < kPrograms.size(); ++i)
@@ -408,6 +443,23 @@ void TestStreamingSets()
     LoadedSet<ArchiveOnly> archive_only;
 
     XSFLIB_CHECK(!LoadSet("mini", MapReader(files), archive_only) && archive_only.sound == 7u);
+
+    // A mini file's list of sounds replaces the library's.
+    {
+        StreamingProgramBuilder b;
+        b.AddFile("f", std::vector<uint8_t>{1});
+        b.AddSounds(std::vector<uint32_t>{1, 2});
+        files["listing lib"] = WritePsf(kVersion, TestDescriptor<kArchiveMagic>{}.Serialize(), b.Data(), {});
+    }
+    {
+        StreamingProgramBuilder b;
+        b.AddSounds(std::vector<uint32_t>{8, 9, 10});
+        files["listing mini"] = WritePsf(kVersion, {}, b.Data(), {{"_lib", "listing lib"}});
+    }
+    LoadedSet<BothModes> listed;
+
+    XSFLIB_CHECK(!LoadSet("listing mini", MapReader(files), listed));
+    XSFLIB_CHECK(listed.sound == 8u && listed.sounds == (std::vector<uint32_t>{8, 9, 10}));
 
     // A game-mode set of a streaming format selects a sound too.
     {
