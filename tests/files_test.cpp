@@ -5,16 +5,16 @@
 
 #include "xsflib/files.h"
 
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <ios>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 #include "xsflib/text.h"
 
 namespace fs = std::filesystem;
@@ -33,9 +33,8 @@ void TestPaths()
 
 void TestFiles()
 {
-    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    const fs::path folder = fs::temp_directory_path() / ("xsflib_files_test_" + std::to_string(stamp));
-    fs::create_directories(folder);
+    const xsflib::testing::TempFolder temp("xsflib_files_test");
+    const fs::path& folder = temp.Path();
     const fs::path path = folder / xsflib::PathFromUtf8("d\xc3\xa9j\xc3\xa0 vu.bin");
 
     // A file written whole reads back whole.
@@ -61,12 +60,9 @@ void TestFiles()
     XSFLIB_CHECK(!xsflib::ReadFile(missing, read));
     XSFLIB_CHECK(xsflib::WriteFile(missing, data) == "can't write " + xsflib::Utf8(missing));
 
-    // A stream reads whole too.
-    std::istringstream stream("abc\0def", std::ios::binary);
-    XSFLIB_CHECK(xsflib::ReadStream(stream, read) && read == std::vector<uint8_t>({'a', 'b', 'c'}));
-
-    std::error_code ec;
-    fs::remove_all(folder, ec);
+    // A stream reads whole too. A zero byte doesn't end it.
+    std::istringstream stream(std::string("abc\0def", 7), std::ios::binary);
+    XSFLIB_CHECK(xsflib::ReadStream(stream, read) && read == std::vector<uint8_t>({'a', 'b', 'c', 0, 'd', 'e', 'f'}));
 }
 
 void TestNumbers()

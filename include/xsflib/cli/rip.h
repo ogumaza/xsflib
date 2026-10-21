@@ -472,10 +472,9 @@ int RunRip(const RipTool<Options>& tool, int argc, char** argv)
         }
     }
 
-    // The rips share the file names of the folders written so far. An input whose canonical path can't be found counts
-    // by its absolute path without a trailing separator.
+    // The rips share the file names of the folders written so far.
     FileNameRegistries names;
-    return RunEachInput(inputs, rip::InputPath, [&](const std::string& in) { return tool.rip_input(in, o, names); });
+    return RunEachInput(inputs, [&](const std::string& in) { return tool.rip_input(in, o, names); });
 }
 
 } // namespace detail

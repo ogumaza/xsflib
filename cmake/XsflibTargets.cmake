@@ -24,6 +24,20 @@ function(xsflib_float_options variable)
     set(${variable} ${options} PARENT_SCOPE)
 endfunction()
 
+# Sets `variable` to the options that make __FILE__ give paths relative to `source` and `binary`, a build's source and
+# build folders. Debug information keeps absolute paths so that debuggers find the sources. MSVC's cl.exe isn't
+# supported and gets no options. xsflib_set_flags and xsflib_project's CHECK_COMPILERS mode use them.
+function(xsflib_prefix_map_options variable source binary)
+    set(options "")
+    if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list(APPEND options "/clang:-fmacro-prefix-map=${source}/=" "/clang:-fmacro-prefix-map=${binary}/=")
+    elseif (NOT MSVC)
+        list(APPEND options "-fmacro-prefix-map=${source}/=" "-fmacro-prefix-map=${binary}/=")
+    endif()
+
+    set(${variable} ${options} PARENT_SCOPE)
+endfunction()
+
 # Output must be the same on every platform. These flags go on xsflib's sources: the warnings and the float options
 # (xsflib_float_options). They then hold however the library is built: as part of another project, or alone for
 # find_package.
@@ -46,16 +60,10 @@ function(xsflib_set_flags target)
     endif()
 
     # __FILE__ gives paths relative to the project's folders when the project (xsflib or a library that builds on it)
-    # is built alone. A project that includes it sets the mapping for its build. MSVC's cl.exe isn't supported and gets
-    # no mapping.
+    # is built alone. A project that includes it sets the mapping for its build.
     if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-        if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            target_compile_options(${target} PRIVATE "/clang:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}/="
-                                                     "/clang:-fmacro-prefix-map=${PROJECT_BINARY_DIR}/=")
-        elseif (NOT MSVC)
-            target_compile_options(${target} PRIVATE -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=
-                                                     -fmacro-prefix-map=${PROJECT_BINARY_DIR}/=)
-        endif()
+        xsflib_prefix_map_options(prefix_map_options ${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR})
+        target_compile_options(${target} PRIVATE ${prefix_map_options})
     endif()
 endfunction()
 

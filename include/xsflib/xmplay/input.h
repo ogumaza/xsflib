@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // An XMPlay input plugin: a template on each format's traits. XMPlay is a 32-bit Windows program. The plugin is
-// therefore a 32-bit DLL (see xsflib_add_xmplay_plugin). XMPlay calls it through the input interface of XMPlay's
-// plugin SDK (xmpin.h): to check a file, to read its length and tags, and to open, decode and seek it. PSF tags become
+// therefore a 32-bit DLL (see xsflib_add_xmplay_plugin). XMPlay calls it through the input interface of XMPlay's plugin
+// SDK (xmpin.h): to check a file, to read its length and tags, and to open, decode and seek it. PSF tags become
 // XMPlay's tags (game as album, year as date). Length and fade come from the tags, or from the defaults on the plugin's
 // options page.
 //
@@ -17,8 +17,8 @@
 // length tag, endless playback and rendering ahead. XMPlay stores the settings among the rest of its settings
 // (XMPFUNC_REGISTRY).
 //
-// A format's plugin defines its traits and XMPIN_GetInterface. XMPIN_GetInterface returns
-// Plugin<Traits>::GetInterface, and the SDK's xmpin.def exports it by that name. The traits provide:
+// A format's plugin defines its traits and XMPIN_GetInterface. XMPIN_GetInterface returns Plugin<Traits>::GetInterface,
+// and the SDK's xmpin.def exports it by that name. The traits provide:
 //
 //   using Player            the format's player (see xsflib/player/playback.h)
 //   using Set               the set that the format's loader assembles and Player::Load takes
@@ -31,6 +31,10 @@
 //   kMaxFileSize            the largest file the plugin reads into memory
 //   kVersion                the plugin's version, for its About box
 //   kAbout                  the About box's text
+//
+// The foobar2000 template (xsflib/foobar2000/input.h) takes the same traits except kVersion and kAbout. It takes
+// kDecoderName and the GUIDs besides. A format with both plugins can define the shared traits in one struct (see that
+// template).
 
 #pragma once
 
@@ -155,8 +159,8 @@ public:
 
             LoadSettings();
 
-            static const std::string extensions = Extensions();
-            static XMPIN plugin = Interface(extensions.c_str());
+            static const std::string kExtensionList = Extensions();
+            static XMPIN plugin = Interface(kExtensionList.c_str());
             return &plugin;
         }
         catch (...)
@@ -254,9 +258,10 @@ private:
     {
         try
         {
-            const std::string caption = std::string(Traits::kName) + " plugin";
-            const std::string text = caption + " " + Traits::kVersion + "\n\n" + Traits::kAbout;
-            MessageBoxW(window, detail::Wide(text).c_str(), detail::Wide(caption).c_str(), MB_OK | MB_ICONINFORMATION);
+            const std::string kCaption = std::string(Traits::kName) + " plugin";
+            const std::string kText = kCaption + " " + Traits::kVersion + "\n\n" + Traits::kAbout;
+            MessageBoxW(window, detail::Wide(kText).c_str(), detail::Wide(kCaption).c_str(),
+                        MB_OK | MB_ICONINFORMATION);
         }
         catch (...)
         {

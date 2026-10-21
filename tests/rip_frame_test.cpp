@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <new>
 #include <optional>
 #include <set>
@@ -17,6 +18,7 @@
 
 #include "xsflib/cli/rip.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 namespace
 {
@@ -81,8 +83,8 @@ struct TestTool
 
 void TestOptionsAndInputs()
 {
-    const fs::path dir = fs::temp_directory_path() / "xsflib_rip_frame_test";
-    fs::create_directories(dir);
+    const xsflib::testing::TempFolder temp("xsflib_rip_frame_test");
+    const fs::path& dir = temp.Path();
     const std::string a = (dir / "a").string();
     const std::string bad = (dir / "bad").string();
     std::ofstream(a).put('a');
@@ -116,8 +118,6 @@ void TestOptionsAndInputs()
 
     XSFLIB_CHECK(t.Run({"--mode", "game", a}) == 2);
     XSFLIB_CHECK(t.Run({"--archive", "x", a}) == 2);
-
-    fs::remove_all(dir);
 }
 
 void TestTags()
@@ -213,9 +213,8 @@ void TestAnalyzeAndWrite()
     XSFLIB_CHECK(timed > 0);
 
     // A mini file for each job, with the common tags and the job's label as its title and sound tag.
-    const fs::path dir = fs::temp_directory_path() / "xsflib_rip_frame_minis";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    const xsflib::testing::TempFolder temp("xsflib_rip_frame_minis");
+    const fs::path& dir = temp.Path();
     xsflib::rip::FileNames names(".tstlib", ".minitst");
     const std::vector<Job> two = {jobs[1], jobs[5]};
     xsflib::psf::Tags seen;
@@ -232,8 +231,6 @@ void TestAnalyzeAndWrite()
     XSFLIB_CHECK(fs::exists(dir / "0001 SEQ_1.minitst") && fs::exists(dir / "0005 SEQ_5.minitst"));
     XSFLIB_CHECK(seen.at("title") == "SEQ_5" && seen.at("tst_sound") == "SEQ_5" && seen.at("game") == "Game");
     XSFLIB_CHECK(!seen.count("length"));
-
-    fs::remove_all(dir);
 }
 
 // Returns the lines that `run` writes to a temporary file.

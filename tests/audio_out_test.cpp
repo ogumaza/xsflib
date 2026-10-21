@@ -5,7 +5,7 @@
 // format in any case. A file that can't be written must be reported. A length that a WAV file can't hold must be
 // rejected before anything is rendered.
 //
-// usage: audio_out_test
+// usage: xsflib_audio_out_test
 
 #include "xsflib/cli/audio_out.h"
 
@@ -22,6 +22,7 @@
 
 #include "xsflib/bytes.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 using xsflib::testing::Check;
 
@@ -147,9 +148,8 @@ void CheckFlac(const fs::path& path, const std::vector<int16_t>& pcm)
 
 int main()
 {
-    const fs::path dir = fs::temp_directory_path() / "xsflib_audio_out_test";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    const xsflib::testing::TempFolder temp("xsflib_audio_out_test");
+    const fs::path& dir = temp.Path();
 
     const std::vector<int16_t> pcm = Signal();
 
@@ -179,8 +179,6 @@ int main()
     // A file in a folder that doesn't exist can't be written.
     XSFLIB_CHECK(xsflib::cli::WriteAudio((dir / "missing" / "out.wav").string(), pcm, kRate).has_value());
     XSFLIB_CHECK(xsflib::cli::WriteAudio((dir / "missing" / "out.flac").string(), pcm, kRate).has_value());
-
-    fs::remove_all(dir);
 
     return xsflib::testing::Summary("audio out");
 }

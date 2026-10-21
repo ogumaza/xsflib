@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
-project(xsflib VERSION 1.4.0 LANGUAGES C CXX)
+project(xsflib VERSION 1.5.0 LANGUAGES C CXX)
 
 # CMake 3.20 has no PROJECT_IS_TOP_LEVEL. xsflib is the top-level project when the build starts in its folder.
 if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -41,7 +41,8 @@ if (XSFLIB_TESTS)
     enable_testing()
 endif()
 
-# The channel log and the WAV writer of play tests.
+# The runner of a test's checks, and the channel log and the WAV writer of play tests.
+xsflib_add_test(testing_check)
 xsflib_add_test(channel_log)
 
 # The common files: byte order, bounds-checked reads, ASCII, UTF-8 names, numbers as text, files and their UTF-8
@@ -52,6 +53,7 @@ xsflib_add_test(binary xsflib::common)
 xsflib_add_test(files xsflib::common)
 xsflib_add_test(sha1 xsflib::common)
 xsflib_add_test(sha256 xsflib::common)
+xsflib_add_test(utf8 xsflib::common)
 xsflib_add_test(samples_sha256 xsflib::common)
 xsflib_add_test(snapshot xsflib::common)
 xsflib_add_test(wav xsflib::common seqlib::seqlib)

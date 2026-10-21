@@ -36,14 +36,13 @@ struct FakeArchive
         g_log.push_back("load archive");
     }
 
+    FakeArchive(const FakeArchive&) = delete;
+    FakeArchive& operator=(const FakeArchive&) = delete;
+
     ~FakeArchive()
     {
         g_log.push_back("archive gone");
     }
-
-    FakeArchive(const FakeArchive&) = delete;
-    FakeArchive& operator=(const FakeArchive&) = delete;
-    FakeArchive& operator=(FakeArchive&&) = delete;
 
     int frames;
 };

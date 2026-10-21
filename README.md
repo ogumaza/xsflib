@@ -18,9 +18,9 @@ Each module is a static library. A project links the ones it uses.
 
 `include/xsflib/foobar2000/input.h` is a foobar2000 input component as a template on a format's traits.
 `include/xsflib/xmplay/input.h` is an XMPlay input plugin as a template on a format's traits. `xsflib::testing` holds
-checks for unit tests, a channel log, the SHA-256 of a render's samples (`testing/samples_sha256.h`) and helpers for the
-tests of a format's sets (`testing/sets.h`). The channel log records a sound's output and its channels. Two logs of one
-sound can be compared line by line.
+checks for unit tests, a channel log, the SHA-256 of a render's samples (`testing/samples_sha256.h`), helpers for the
+tests of a format's sets (`testing/sets.h`) and a new temporary folder for each run of a test (`testing/temp_folder.h`).
+The channel log records a sound's output and its channels. Two logs of one sound can be compared line by line.
 
 `cmake/XsflibApps.cmake` builds common parts of a program: the Windows version resource, the macOS droplet apps, the
 foobar2000 component and the XMPlay plugin. A project includes `cmake/XsflibProject.cmake` from its submodule before it

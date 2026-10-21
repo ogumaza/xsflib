@@ -11,10 +11,10 @@
 #include <fstream>
 #include <iterator>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 using namespace xsflib::testing;
 
@@ -117,15 +117,10 @@ void TestWav(const fs::path& dir)
 
 int main()
 {
-    std::error_code ec;
-    const fs::path dir = fs::temp_directory_path() / "xsflib_channel_log_test";
-    fs::remove_all(dir, ec);
-    fs::create_directories(dir);
+    const TempFolder temp("xsflib_channel_log_test");
 
-    TestLogs(dir);
-    TestWav(dir);
-
-    fs::remove_all(dir, ec);
+    TestLogs(temp.Path());
+    TestWav(temp.Path());
 
     return xsflib::testing::Summary("channel log");
 }

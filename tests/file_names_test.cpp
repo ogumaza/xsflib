@@ -13,10 +13,14 @@
 
 #include "xsflib/rip/tool.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 using xsflib::rip::FileNames;
 
-static void TestCharacters()
+namespace
+{
+
+void TestCharacters()
 {
     FileNames names(".xyzlib", ".minixyz");
 
@@ -27,7 +31,7 @@ static void TestCharacters()
     XSFLIB_CHECK(mini == "0007 SEQ_BGM_1.minixyz");
 }
 
-static void TestReservedNames()
+void TestReservedNames()
 {
     FileNames names(".xyzlib", ".minixyz");
 
@@ -42,7 +46,7 @@ static void TestReservedNames()
     XSFLIB_CHECK(names.Library("COM\xc2\xbc") == "COM\xc2\xbc.xyzlib");
 }
 
-static void TestCharactersOutsideAscii()
+void TestCharactersOutsideAscii()
 {
     FileNames names(".xyzlib", ".minixyz");
 
@@ -62,7 +66,7 @@ static void TestCharactersOutsideAscii()
     XSFLIB_CHECK(names.Library("A\x80Z\xe3\x82") == "A_Z__.xyzlib");
 }
 
-static void TestNamesDifferInMoreThanCase()
+void TestNamesDifferInMoreThanCase()
 {
     FileNames names(".xyzlib", ".minixyz");
 
@@ -80,10 +84,11 @@ static void TestNamesDifferInMoreThanCase()
 }
 
 // The output folder that a rip tool makes next to its input when -o isn't given.
-static void TestDefaultOutputDir()
+void TestDefaultOutputDir()
 {
     namespace fs = std::filesystem;
-    const fs::path dir = fs::temp_directory_path() / "xsflib_file_names_test";
+    const xsflib::testing::TempFolder temp("xsflib_file_names_test");
+    const fs::path& dir = temp.Path();
     fs::create_directories(dir / "Game");
 
     const fs::path image = xsflib::rip::DefaultOutputDir((dir / "Game.iso").string(), "_xyz");
@@ -92,16 +97,14 @@ static void TestDefaultOutputDir()
     XSFLIB_CHECK(image == fs::absolute(dir / "Game_xyz").lexically_normal());
     XSFLIB_CHECK(folder == fs::absolute(dir / "Game_xyz").lexically_normal());
     XSFLIB_CHECK(xsflib::rip::NameOfInput((dir / "Game").string()) == "Game");
-
-    fs::remove_all(dir);
 }
 
 // The first bytes of an input: as many as asked for, fewer from a short file, and none from a folder or a missing file.
-static void TestReadHead()
+void TestReadHead()
 {
     namespace fs = std::filesystem;
-    const fs::path dir = fs::temp_directory_path() / "xsflib_read_head_test";
-    fs::create_directories(dir);
+    const xsflib::testing::TempFolder temp("xsflib_read_head_test");
+    const fs::path& dir = temp.Path();
     std::ofstream(dir / "long.bin", std::ios::binary) << "YTAG\xff\xfe"
                                                          "0123456789";
     std::ofstream(dir / "short.bin", std::ios::binary) << "XTAG";
@@ -116,18 +119,18 @@ static void TestReadHead()
     XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "short.bin").string()) == "XTAG");
     XSFLIB_CHECK(xsflib::rip::ReadHead(dir.string()).empty());
     XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "missing.bin").string()).empty());
-
-    fs::remove_all(dir);
 }
 
 // Archives whose names clash, ignoring case, take the folders above them until they differ.
-static void TestArchiveFolders()
+void TestArchiveFolders()
 {
     XSFLIB_CHECK((xsflib::rip::ArchiveFolders({"content/BGM/sound.xyzar", "content/SE/sound.xyzar", "other.xyzar"}) ==
                   std::vector<std::string>{"BGM_sound", "SE_sound", "other"}));
     XSFLIB_CHECK((xsflib::rip::ArchiveFolders({"a/Sound.xyzar", "b/sound.xyzst"}) ==
                   std::vector<std::string>{"a_Sound", "b_sound"}));
 }
+
+} // namespace
 
 int main()
 {

@@ -28,10 +28,13 @@ using xsflib::LoadLe32;
 using xsflib::StoreLe32;
 using xsflib::testing::Check;
 
+namespace
+{
+
 // A version byte for the files that the tests write. Any value works.
 constexpr uint8_t kVersion = 0x27;
 
-static void TestTimes()
+void TestTimes()
 {
     XSFLIB_CHECK(ParseTime("") == -1);
     XSFLIB_CHECK(ParseTime("abc") == -1);
@@ -61,7 +64,7 @@ static void TestTimes()
 
 // Numbers in tags: an optional sign, digits with '.' or ',' before decimals, and an optional exponent, with the values
 // that std::strtod gives in the C locale. Text after the number is left unread.
-static void TestDecimals()
+void TestDecimals()
 {
     for (const char* text : {"0", "0.5", "1,25", "-1.5", "+2", ".5", "5.", "123.456", "0.000123", "2.718281828459045",
                              "1e3", "1.5E-3", "1e22", "1e-22", "9007199254740992", "0.1", "0.3", "62.226"})
@@ -95,7 +98,7 @@ static void TestDecimals()
 
 // Under a locale that writes decimals with a comma, std::strtod stops at '.'. Tags still read the same. The check runs
 // only where such a locale is installed.
-static void TestDecimalsUnderCommaLocale()
+void TestDecimalsUnderCommaLocale()
 {
     const char* comma_locale = nullptr;
     for (const char* name : {"de_DE.UTF-8", "de_DE.utf8", "de_DE", "fr_FR.UTF-8", "de-DE", "German_Germany.1252"})
@@ -122,7 +125,7 @@ static void TestDecimalsUnderCommaLocale()
     Check(length == 62226, std::string("a length of 1:02.226 reads as 62,226 ms under ") + comma_locale);
 }
 
-static void TestPsfRoundTrip()
+void TestPsfRoundTrip()
 {
     std::vector<uint8_t> reserved = {1, 2, 3, 4, 5};
     Tags tags = {{"title", "Test"}, {"comment", "line one\nline two"}, {"_lib", "x.xyzlib"}};
@@ -166,7 +169,7 @@ static void TestPsfRoundTrip()
     XSFLIB_CHECK(ParsePsf(short_stream, psf) == "truncated program data");
 }
 
-static void TestTagParsing()
+void TestTagParsing()
 {
     const std::string kHeader = std::string("PSF") + static_cast<char>(kVersion) + std::string(12, '\0');
     const std::string kTaggedPsf = kHeader +
@@ -191,7 +194,7 @@ static void TestTagParsing()
     XSFLIB_CHECK(psf.tags["comment"] == "a\nb");
 }
 
-static void TestParseOptions()
+void TestParseOptions()
 {
     const std::vector<uint8_t> kProgram = {1, 2, 3, 4, 5, 6, 7, 8};
     const auto file = WritePsf(kVersion, {9}, kProgram, {{"_lib", "a.lib"}});
@@ -266,7 +269,7 @@ static void TestParseOptions()
     XSFLIB_CHECK(!ParsePsf(file, psf, options) && psf.version == kVersion && psf.program == kProgram);
 }
 
-static void TestVariables()
+void TestVariables()
 {
     XSFLIB_CHECK((ParseVariables("0=1") == Variables{{0, 1}}));
     XSFLIB_CHECK((ParseVariables("0=1, 17=-1") == Variables{{0, 1}, {17, -1}}));
@@ -285,6 +288,8 @@ static void TestVariables()
     XSFLIB_CHECK(
         (ParseVariables(FormatVariables({{0, 1}, {16, -5}, {31, 300}})) == Variables{{0, 1}, {16, -5}, {31, 300}}));
 }
+
+} // namespace
 
 int main()
 {

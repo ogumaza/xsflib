@@ -101,8 +101,8 @@ struct LoadedSet
     std::optional<ProcessDescriptorOf<Format>> descriptor; // game mode
     std::optional<ArchiveDescriptorOf<Format>> archive;    // archive mode
 
-    // Archive mode: the sounds that the last SND chunk in loading order selects, in its order, and the first of them.
-    // A format that plays one sound takes `sound`.
+    // Archive mode: the sounds that the last SND chunk in loading order selects, in its order, and the first of them. A
+    // format that plays one sound takes `sound`.
     std::optional<uint32_t> sound;
     std::vector<uint32_t> sounds;
 

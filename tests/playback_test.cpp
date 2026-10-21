@@ -27,7 +27,7 @@ int16_t RampSample(uint64_t frame)
     return static_cast<int16_t>(frame % 20000);
 }
 
-// A player without snapshots. It renders RampSample, and reports that it finished at `finish_at`.
+// A player without snapshots. It renders RampSample, and reports that it finished at `finish_at_`.
 class RampPlayer
 {
 public:

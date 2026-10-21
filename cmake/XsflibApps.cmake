@@ -323,7 +323,7 @@ endfunction()
 # that use locally supplied files. xsflib_include_local_tests is a macro because the files must run in the project's
 # scope.
 macro(xsflib_include_local_tests)
-    file(GLOB xsflib_local_tests CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/*/local_tests.cmake)
+    file(GLOB xsflib_local_tests CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/*/local_tests.cmake)
     foreach (xsflib_local_test IN LISTS xsflib_local_tests)
         include(${xsflib_local_test})
     endforeach()

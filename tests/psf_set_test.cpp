@@ -5,7 +5,6 @@
 // archive mode and one that hasn't.
 
 #include <cstdint>
-#include <cstdio>
 #include <map>
 #include <optional>
 #include <stdexcept>

@@ -45,8 +45,8 @@ class TestPlayer : public xsflib::player::PlayerBase<TestPlayer, TestSet>
 public:
     using Snapshot = xsflib::player::Snapshot<TestSource>;
 
-    int start_failures = 0;
-    int unloads = 0;
+    int start_failures_ = 0;
+    int unloads_ = 0;
 
 private:
     friend class xsflib::player::PlayerBase<TestPlayer, TestSet>;
@@ -71,7 +71,7 @@ private:
 
     void Unload()
     {
-        unloads++;
+        unloads_++;
         started_ = false;
     }
 
@@ -140,12 +140,12 @@ private:
 
     void OnStartFailure()
     {
-        start_failures++;
+        start_failures_++;
     }
 
     uint32_t DriverStatus() const
     {
-        return status_ < set_.boot_status.size() ? set_.boot_status[status_] : 1;
+        return status_ < set_.boot_status.size() ? set_.boot_status[status_] : xsflib::player::kDriverPlaying;
     }
 
     uint64_t EmulatedCycles() const
@@ -210,7 +210,7 @@ void TestLoadAndRender()
     XSFLIB_CHECK(player.GetState() == TestPlayer::State::kError && player.Error() == "can't read missing");
 
     XSFLIB_CHECK(player.Load("song", reader));
-    XSFLIB_CHECK(player.unloads == 1 && player.GetState() == TestPlayer::State::kIdle && player.Error().empty());
+    XSFLIB_CHECK(player.unloads_ == 1 && player.GetState() == TestPlayer::State::kIdle && player.Error().empty());
     XSFLIB_CHECK(player.LengthMs() == 1500 && player.FadeMs() == -1 && player.Volume() == 1.0);
     XSFLIB_CHECK(player.GetLoadedSet().steps == 4 && player.GetTags().at("length") == "1.5");
 
@@ -253,7 +253,7 @@ void TestFailures()
     XSFLIB_CHECK(player.Load(set));
     XSFLIB_CHECK(!player.Start());
     XSFLIB_CHECK(player.GetState() == TestPlayer::State::kError && player.Error() == "the test failed: no sound");
-    XSFLIB_CHECK(player.start_failures == 1);
+    XSFLIB_CHECK(player.start_failures_ == 1);
 
     // A step that throws stops the render with silence.
     set = Steps(10);
@@ -267,23 +267,30 @@ void TestFailures()
 
 void TestBoot()
 {
+    using xsflib::player::kDriverBooting;
+
     // The driver boots for three steps, then plays. The samples of the boot are dropped.
     TestPlayer player;
     TestSet set = Steps(4);
-    set.boot_status = {0, 0, 0};
+    set.boot_status = {kDriverBooting, kDriverBooting, kDriverBooting};
 
     XSFLIB_CHECK(player.Load(set) && player.Start());
     int16_t out[4];
     XSFLIB_CHECK(player.Render(out, 2) == 2 && out[0] == 10 && out[2] == 11);
 
+    // A sound that has finished by the end of the boot ends the wait too.
+    set.boot_status = {kDriverBooting, xsflib::player::kDriverFinished};
+
+    XSFLIB_CHECK(player.Load(set) && player.Start());
+
     // A driver error, with the step in the low byte.
-    set.boot_status = {0, 0x80000007u};
+    set.boot_status = {kDriverBooting, xsflib::player::kDriverFailed | 7};
 
     XSFLIB_CHECK(player.Load(set) && !player.Start());
     XSFLIB_CHECK(player.Error() == "driver error at step 7");
 
     // A driver that never starts the sound.
-    set.boot_status.assign(50, 0);
+    set.boot_status.assign(50, kDriverBooting);
 
     XSFLIB_CHECK(player.Load(set) && !player.Start());
     XSFLIB_CHECK(player.Error() == "timed out waiting for the sound to start");

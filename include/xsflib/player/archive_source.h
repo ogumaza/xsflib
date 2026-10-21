@@ -4,6 +4,7 @@
 // Archive mode takes the same steps on every console. The source checks the set and finds the archive's files in it,
 // loads the archive, starts the model and then the sequence, and then runs the model a frame at a time until the
 // sequence ends.
+//
 // Some models also take snapshots. A Traits class gives each console's steps, and the words of every message:
 //
 //   using Set                  the format's loaded set

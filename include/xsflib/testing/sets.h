@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// Helpers for the tests of PSF sets: a set's files held in memory, the loader's error for a set, the whole of a set's
-// playback, and checks of a playback's length, fade, end, volume and seeks, and of the sets that a playback rejects.
+// Helpers for the tests of PSF sets: a set's files held in memory, the loader's error for a set, a render's frames, the
+// whole of a set's playback, and checks of a playback's length, fade, end, volume and seeks, and of the sets that a
+// playback rejects.
 
 #pragma once
 
@@ -48,6 +49,32 @@ std::string LoadError(const std::string& path, const psf::FileReader& reader)
     return psf::LoadSet(path, reader, set).value_or("");
 }
 
+// Reads stereo frames from `read`, `block` at a time, until `read` gives no frames or `limit` frames have been read.
+// `read` is a call (int16_t* out, std::size_t frames) -> std::size_t that writes up to `frames` frames to `out` and
+// returns how many it wrote. A playback's Render and a RenderAhead's Read are calls of that kind.
+template <typename Read>
+std::vector<int16_t> RenderFrames(Read read, std::size_t limit = SIZE_MAX, std::size_t block = 1024)
+{
+    std::vector<int16_t> pcm;
+    std::size_t done = 0;
+    while (done < limit)
+    {
+        const std::size_t ask = std::min(block, limit - done);
+        pcm.resize(2 * (done + ask));
+        const std::size_t got = read(pcm.data() + 2 * done, ask);
+        if (got == 0)
+        {
+            break;
+        }
+
+        done += got;
+    }
+
+    pcm.resize(2 * done);
+
+    return pcm;
+}
+
 // The whole output of a `Playback` of the set at `path`, read with `reader`, in stereo frames rendered `block` at a
 // time. A playback that doesn't open and start fails a check with its error, and gives nothing.
 template <typename Playback>
@@ -60,14 +87,8 @@ std::vector<int16_t> RenderAll(const std::string& path, const psf::FileReader& r
         return {};
     }
 
-    std::vector<int16_t> out;
-    std::vector<int16_t> buffer(block * 2);
-    while (const std::size_t got = playback.Render(buffer.data(), block))
-    {
-        out.insert(out.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(got * 2));
-    }
-
-    return out;
+    return RenderFrames([&playback](int16_t* out, std::size_t frames) { return playback.Render(out, frames); },
+                        SIZE_MAX, block);
 }
 
 // Checks the playback of a set with a tagged length and fade, in stereo frames. `played` holds `length` frames of

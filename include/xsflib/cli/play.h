@@ -352,8 +352,7 @@ int Run(const PlayTool<Player>& tool, int argc, char** argv)
         tool.before_inputs();
     }
 
-    // Renders one input. A folder fails. A library is skipped: the minis load it. An input whose canonical path can't
-    // be found counts by its absolute path.
+    // Renders one input. A folder fails. A library is skipped: the minis load it.
     const auto render = [&](const std::string& in)
     {
         std::error_code ec;
@@ -372,7 +371,7 @@ int Run(const PlayTool<Player>& tool, int argc, char** argv)
         const fs::path out = o.out.empty() ? fs::path(in).replace_extension(".wav") : fs::path(o.out);
         return Render(tool, in, out, o);
     };
-    return RunEachInput(inputs, [](const std::string& in) { return fs::absolute(in); }, render);
+    return RunEachInput(inputs, render);
 }
 
 } // namespace detail

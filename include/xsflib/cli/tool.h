@@ -86,10 +86,10 @@ inline bool InputsExist(const std::vector<std::string>& inputs, const char* outp
 // Runs `run(input)` on each input in turn, and returns the highest exit code. A failed input doesn't stop the rest.
 // With more than one input, a line with the input's name and a colon comes before its messages. The macOS droplet
 // reports each input from the messages after its line. An input whose canonical path is an earlier input's is skipped.
-// Where the canonical path can't be found, `fallback_key(input)` takes its place. An exception from `run` is reported
-// as the input's error.
-template <typename FallbackKey, typename Run>
-int RunEachInput(const std::vector<std::string>& inputs, const FallbackKey& fallback_key, const Run& run)
+// Where the canonical path can't be found, the absolute path without a trailing separator takes its place. An exception
+// from `run` is reported as the input's error.
+template <typename Run>
+int RunEachInput(const std::vector<std::string>& inputs, const Run& run)
 {
     namespace fs = std::filesystem;
 
@@ -97,18 +97,23 @@ int RunEachInput(const std::vector<std::string>& inputs, const FallbackKey& fall
     int result = 0;
     for (std::size_t i = 0; i < inputs.size(); i++)
     {
+        // The input's absolute path, without the separator at the end of a folder given with one. It gives the input's
+        // name.
         const std::string& in = inputs[i];
+        fs::path path = fs::absolute(in).lexically_normal();
+        if (!path.has_filename())
+        {
+            path = path.parent_path();
+        }
+
         if (inputs.size() > 1)
         {
-            // For a folder given with a slash at the end, print the folder's name.
-            const fs::path path = fs::absolute(in).lexically_normal();
-            const fs::path name = path.has_filename() ? path.filename() : path.parent_path().filename();
-            std::fprintf(stderr, "%s%s:\n", i ? "\n" : "", name.string().c_str());
+            std::fprintf(stderr, "%s%s:\n", i ? "\n" : "", path.filename().string().c_str());
         }
 
         std::error_code ec;
         const fs::path canonical = fs::weakly_canonical(in, ec);
-        if (!done.insert(ec ? fallback_key(in) : canonical).second)
+        if (!done.insert(ec ? path : canonical).second)
         {
             std::fprintf(stderr, "skipped duplicate input\n");
             continue;

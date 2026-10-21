@@ -15,6 +15,7 @@
 int main(int argc, char** argv)
 {
     const std::vector<std::string> args = xsflib::console::Arguments(argc, argv);
+
     XSFLIB_CHECK(static_cast<int>(args.size()) == argc);
 #ifndef _WIN32
     XSFLIB_CHECK(args == std::vector<std::string>(argv, argv + argc));

@@ -34,8 +34,8 @@ enum class BoundsMessage
     kFixed,       // ReaderOptions::fixed_message, without an offset
 };
 
-// How a Reader reports bad input. Messages are a program's output. The options select the wording that a program
-// prints and whether CString throws for an offset past the end of the data.
+// How a Reader reports bad input. Messages are a program's output. The options select the wording that a program prints
+// and whether CString throws for an offset past the end of the data.
 struct ReaderOptions
 {
     BoundsMessage bounds_message = BoundsMessage::kOutOfBounds;

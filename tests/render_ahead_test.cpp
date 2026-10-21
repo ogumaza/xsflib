@@ -5,7 +5,7 @@
 // its memory limit. Errors must reach the reader after any preceding audio. Reads and the worker must stop on request.
 // A random test covers combinations of reads and seeks across many tracks.
 //
-// usage: render_ahead_test [rounds of the random test]
+// usage: xsflib_render_ahead_test [rounds of the random test]
 
 #include "xsflib/player/render_ahead.h"
 
@@ -29,11 +29,11 @@ using namespace xsflib::player;
 using xsflib::testing::Check;
 using xsflib::testing::failures;
 
-// The sample rate of the sources here. It sets the size of the buffer's blocks.
-constexpr int kRate = 32'000;
-
 namespace
 {
+
+// The sample rate of the sources here. It sets the size of the buffer's blocks.
+constexpr int kRate = 32'000;
 
 using Clock = std::chrono::steady_clock;
 

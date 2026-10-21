@@ -64,6 +64,7 @@ std::vector<std::string> Arguments(int argc, char** argv)
 
             args.push_back(std::move(a));
         }
+
         LocalFree(wargv);
     }
 #endif

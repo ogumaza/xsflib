@@ -59,6 +59,13 @@ enum class State
     kError,
 };
 
+// The values of a game-mode driver's status word (DriverStatus, for PlayerBase::RunUntilSoundPlays).
+inline constexpr uint32_t kDriverBooting = 0;          // the game boots
+inline constexpr uint32_t kDriverPlaying = 1;          // the sound plays
+inline constexpr uint32_t kDriverFinished = 2;         // the sound has finished
+inline constexpr uint32_t kDriverFailed = 0x80000000u; // bit 31: a step of the driver failed
+inline constexpr uint32_t kDriverFailedStep = 0xff;    // with kDriverFailed, the bits that give the failed step
+
 // A snapshot of a player between steps: the player's state, the samples produced but not handed out yet, and the
 // source's part. Only the player that took it can restore it, and only before that player's next Start.
 template <typename SourceSnapshot>
@@ -323,20 +330,21 @@ protected:
         }
     }
 
-    // For a game mode whose driver reports in a status word: 0 while the game boots, 1 once the sound plays and 2 once
-    // it has finished, or bit 31 with the failed step in the low byte. Runs the emulation until the sound plays or has
-    // finished, for at most `timeout` emulated cycles, and drops the samples before. Returns false after an error.
+    // For a game mode whose driver reports in a status word: kDriverBooting while the game boots, kDriverPlaying once
+    // the sound plays and kDriverFinished once it has finished, or kDriverFailed with the failed step. Runs the
+    // emulation until the sound plays or has finished, for at most `timeout` emulated cycles, and drops the samples
+    // before. Returns false after an error.
     bool RunUntilSoundPlays(uint64_t timeout)
     {
         while (true)
         {
             const uint32_t status = Self().DriverStatus();
-            if (status & 0x80000000u)
+            if (status & kDriverFailed)
             {
-                return Fail("driver error at step " + std::to_string(status & 0xff));
+                return Fail("driver error at step " + std::to_string(status & kDriverFailedStep));
             }
 
-            if (status == 1 || status == 2)
+            if (status == kDriverPlaying || status == kDriverFinished)
             {
                 return true;
             }

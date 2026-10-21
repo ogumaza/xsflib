@@ -101,6 +101,9 @@ public:
         zs_.avail_in = size;
     }
 
+    InflateSource(const InflateSource&) = delete;
+    InflateSource& operator=(const InflateSource&) = delete;
+
     ~InflateSource() override
     {
         if (ok_)
@@ -108,9 +111,6 @@ public:
             inflateEnd(&zs_);
         }
     }
-
-    InflateSource(const InflateSource&) = delete;
-    InflateSource& operator=(const InflateSource&) = delete;
 
     std::optional<std::string> Read(uint8_t* dest, std::size_t n, std::size_t& got) override
     {

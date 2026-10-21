@@ -6,15 +6,18 @@
 
 #include "xsflib/cli/play.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <string>
 #include <vector>
 
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/temp_folder.h"
 
 using xsflib::testing::Check;
 namespace fs = std::filesystem;
@@ -154,9 +157,8 @@ int RunWith(std::vector<std::string> args)
 
 int main()
 {
-    const fs::path dir = fs::temp_directory_path() / "xsflib_play_test";
-    fs::remove_all(dir);
-    fs::create_directories(dir);
+    const xsflib::testing::TempFolder temp("xsflib_play_test");
+    const fs::path& dir = temp.Path();
     const fs::path mini = dir / "song.minitest";
     const fs::path library = dir / "set.testlib";
     std::ofstream(mini, std::ios::binary) << "x";
@@ -178,8 +180,6 @@ int main()
     Check(no_value == 2 && bad_time == 2, "bad arguments exit with 2");
     Check(missing == 1, "a missing input fails");
     Check(xsflib::cli::DescribeChunks(ChunkSet{}) == "3 memory chunks, 2 files", "the description of a set's chunks");
-
-    fs::remove_all(dir);
 
     return xsflib::testing::Summary("play tool");
 }

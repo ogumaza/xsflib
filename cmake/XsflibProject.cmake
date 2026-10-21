@@ -10,7 +10,7 @@
 # The settings keep the output the same on every platform. A project gets its warnings in one of two ways: in a
 # variable that its targets take, or on every target.
 
-# Both modes use xsflib_float_options.
+# Both modes use xsflib_float_options. CHECK_COMPILERS also uses xsflib_prefix_map_options.
 include(${CMAKE_CURRENT_LIST_DIR}/XsflibTargets.cmake)
 
 # Sets the C++ standard, a release build by default, the static C runtime and the compiler options. CHECK_COMPILERS
@@ -66,14 +66,9 @@ macro(xsflib_project)
         # Output must not depend on the platform: every build computes the same floats.
         xsflib_float_options(_xsflib_project_float_options)
         add_compile_options(${_xsflib_project_float_options})
-        # __FILE__ gives paths relative to the source or build directory. Debug information keeps absolute paths so
-        # that debuggers find the sources.
-        if (${_xsflib_project_PREFIX}_CLANG_CL)
-            add_compile_options("/clang:-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/="
-                                "/clang:-fmacro-prefix-map=${CMAKE_BINARY_DIR}/=")
-        else()
-            add_compile_options(-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/= -fmacro-prefix-map=${CMAKE_BINARY_DIR}/=)
-        endif()
+        # __FILE__ gives paths relative to the source or build directory.
+        xsflib_prefix_map_options(_xsflib_project_prefix_map_options ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+        add_compile_options(${_xsflib_project_prefix_map_options})
         if (NOT _xsflib_project_NO_WARNINGS)
             xsflib_project_warnings(${_xsflib_project_PREFIX})
         endif()
@@ -101,7 +96,8 @@ macro(xsflib_project)
     endif()
 
     foreach (_xsflib_project_variable IN ITEMS CHECK_COMPILERS WARNINGS_ON_EVERY_TARGET NOMINMAX NO_WARNINGS NAME
-                                               PREFIX UNPARSED_ARGUMENTS KEYWORDS_MISSING_VALUES compiler float_options)
+                                               PREFIX UNPARSED_ARGUMENTS KEYWORDS_MISSING_VALUES compiler float_options
+                                               prefix_map_options)
         unset(_xsflib_project_${_xsflib_project_variable})
     endforeach()
     unset(_xsflib_project_variable)

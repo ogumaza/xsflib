@@ -27,7 +27,7 @@ struct ModeSnapshot
     std::shared_ptr<GamePart> game;
 };
 
-namespace modes_detail
+namespace detail
 {
 
 // A source's snapshot in a std::shared_ptr, whether the source's Save returns one or a value.
@@ -45,7 +45,7 @@ std::shared_ptr<Part> SavePart(Source& source, const Part* previous)
     }
 }
 
-} // namespace modes_detail
+} // namespace detail
 
 // SaveSource's work: the snapshot of `archive` or `game`, whichever plays. The new part may share what hasn't changed
 // with `previous`. `previous` is null or an earlier part. Returns nullptr when neither plays.
@@ -55,11 +55,11 @@ std::shared_ptr<const SourceSnapshot> SaveModes(Archive* archive, Game* game, co
     auto source = std::make_shared<SourceSnapshot>();
     if (archive)
     {
-        source->archive = modes_detail::SavePart(*archive, previous ? previous->archive.get() : nullptr);
+        source->archive = detail::SavePart(*archive, previous ? previous->archive.get() : nullptr);
     }
     else if (game)
     {
-        source->game = modes_detail::SavePart(*game, previous ? previous->game.get() : nullptr);
+        source->game = detail::SavePart(*game, previous ? previous->game.get() : nullptr);
     }
     else
     {

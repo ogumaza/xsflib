@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// Checks the helpers for the tests of PSF sets (xsflib/testing/sets.h): the reader of files in memory, the whole output
-// of a playback, and the checks of a playback. Each check passes on a right playback and fails on a wrong one.
+// Checks the helpers for the tests of PSF sets (xsflib/testing/sets.h): the reader of files in memory, the reads of a
+// render's frames, the whole output of a playback, and the checks of a playback. Each check passes on a right playback
+// and fails on a wrong one.
 
 #include <algorithm>
 #include <cmath>
@@ -123,13 +124,60 @@ private:
     std::string error_;
 };
 
+// The samples of a CountingPlayback's first `frames` frames.
+std::vector<int16_t> CountingSamples(std::size_t frames)
+{
+    std::vector<int16_t> samples;
+    for (int16_t v = 1; v <= static_cast<int16_t>(2 * frames); v++)
+    {
+        samples.push_back(v);
+    }
+
+    return samples;
+}
+
+void TestRenderFrames()
+{
+    CountingPlayback playback;
+    std::vector<std::size_t> asks;
+    const auto read = [&playback, &asks](int16_t* out, std::size_t frames)
+    {
+        asks.push_back(frames);
+
+        return playback.Render(out, frames);
+    };
+
+    // Renders from the start. `asks` gets the frames that each read asks for.
+    const auto render = [&](std::size_t limit, std::size_t block)
+    {
+        playback.Start();
+        asks.clear();
+
+        return xsflib::testing::RenderFrames(read, limit, block);
+    };
+
+    const std::vector<int16_t> all = CountingSamples(CountingPlayback::kFrames);
+
+    // The limit cuts the last read short.
+    XSFLIB_CHECK(render(5, 2) == CountingSamples(5) && asks == std::vector<std::size_t>({2, 2, 1}));
+
+    // Without a limit, the reads go on until one gives no frames.
+    XSFLIB_CHECK(render(SIZE_MAX, 3) == all && asks == std::vector<std::size_t>({3, 3, 3, 3}));
+
+    // A limit past the end, and a limit of 0.
+    XSFLIB_CHECK(render(100, 1024) == all && asks == std::vector<std::size_t>({100, 93}));
+    XSFLIB_CHECK(render(0, 1024).empty() && asks.empty());
+
+    // By default, there's no limit, and the reads ask for 1,024 frames.
+    playback.Start();
+    asks.clear();
+
+    XSFLIB_CHECK(xsflib::testing::RenderFrames(read) == all && asks == std::vector<std::size_t>({1024, 1024}));
+}
+
 void TestRenderAll()
 {
-    std::vector<int16_t> expected;
-    for (int16_t v = 1; v <= static_cast<int16_t>(2 * CountingPlayback::kFrames); v++)
-    {
-        expected.push_back(v);
-    }
+    const std::vector<int16_t> expected = CountingSamples(CountingPlayback::kFrames);
 
     // Blocks that divide the playback and blocks that don't give the same output.
     XSFLIB_CHECK(xsflib::testing::RenderAll<CountingPlayback>("song", {}, 3) == expected);
@@ -236,6 +284,7 @@ void TestRefusals()
 int main()
 {
     TestMapReader();
+    TestRenderFrames();
     TestRenderAll();
     TestLengthAndFade();
     TestEnd();

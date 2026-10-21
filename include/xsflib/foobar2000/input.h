@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-// A foobar2000 input component: a template on each format's traits. PSF tags are shown as metadata (game as album,
-// year as date). Length and fade come from the tags, or from the defaults in Advanced preferences > Decoding > the
-// format's decoder. The tags can be edited.
+// A foobar2000 input component: a template on each format's traits. PSF tags are shown as metadata (game as album, year
+// as date). Length and fade come from the tags, or from the defaults in Advanced preferences > Decoding > the format's
+// decoder. The tags can be edited.
 //
 // The format's player does the emulation. While playing, the component renders ahead on a worker thread and buffers the
 // audio (see xsflib/player/render_ahead.h). Seeks within the buffer are instant. Seeks further ahead wait for rendering
@@ -26,12 +26,18 @@
 //                           of names, or an empty one. They aren't metadata. foobar2000 doesn't show them, and editing
 //                           the tags keeps them as they are
 //   kInputGuid, kBranchGuid, kLengthGuid, kFadeGuid, kEndlessGuid, kRenderAheadGuid
+//
+// The XMPlay template (xsflib/xmplay/input.h) takes the same traits except kDecoderName and the GUIDs. A format with
+// both plugins can define the shared traits in one struct. Both sets of traits derive from that struct. The struct can
+// hold the XMPlay template's kVersion and kAbout too. The component can then pass them to DECLARE_COMPONENT_VERSION as
+// its version and about text.
 
 #pragma once
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
@@ -71,26 +77,26 @@ public:
         return *instance_;
     }
 
-    advconfig_branch_factory branch{Traits::kDecoderName, Traits::kBranchGuid, advconfig_entry::guid_branch_decoding,
-                                    0};
-    advconfig_integer_factory default_length{"Default length for files without a length tag (seconds)",
-                                             Traits::kLengthGuid,
-                                             Traits::kBranchGuid,
-                                             0,
-                                             Options::kDefaultLengthMs / 1000,
-                                             1,
-                                             24 * 3600};
-    advconfig_integer_factory default_fade{"Default fade for files without a length tag (seconds)",
-                                           Traits::kFadeGuid,
-                                           Traits::kBranchGuid,
-                                           1,
-                                           Options::kDefaultFadeMs / 1000,
-                                           0,
-                                           3600};
-    advconfig_checkbox_factory endless{"Play endlessly (ignore lengths during playback only)", Traits::kEndlessGuid,
-                                       Traits::kBranchGuid, 2, false};
-    advconfig_checkbox_factory render_ahead{"Render ahead during playback (quicker seeking; uses more CPU and memory)",
-                                            Traits::kRenderAheadGuid, Traits::kBranchGuid, 3, true};
+    advconfig_branch_factory branch_{Traits::kDecoderName, Traits::kBranchGuid, advconfig_entry::guid_branch_decoding,
+                                     0};
+    advconfig_integer_factory default_length_{"Default length for files without a length tag (seconds)",
+                                              Traits::kLengthGuid,
+                                              Traits::kBranchGuid,
+                                              0,
+                                              Options::kDefaultLengthMs / 1000,
+                                              1,
+                                              24 * 3600};
+    advconfig_integer_factory default_fade_{"Default fade for files without a length tag (seconds)",
+                                            Traits::kFadeGuid,
+                                            Traits::kBranchGuid,
+                                            1,
+                                            Options::kDefaultFadeMs / 1000,
+                                            0,
+                                            3600};
+    advconfig_checkbox_factory endless_{"Play endlessly (ignore lengths during playback only)", Traits::kEndlessGuid,
+                                        Traits::kBranchGuid, 2, false};
+    advconfig_checkbox_factory render_ahead_{"Render ahead during playback (quicker seeking; uses more CPU and memory)",
+                                             Traits::kRenderAheadGuid, Traits::kBranchGuid, 3, true};
 
 private:
     inline static Settings* instance_ = nullptr;
@@ -274,7 +280,7 @@ public:
         // a finite length and never seek. A player without snapshots ignores that option.
         const bool playing = (p_flags & input_flag_playback) != 0;
         Options options = DefaultOptions();
-        options.endless = Settings<Traits>::Get().endless.get() && playing && !(p_flags & input_flag_no_looping);
+        options.endless = Settings<Traits>::Get().endless_.get() && playing && !(p_flags & input_flag_no_looping);
         options.snapshots = playing;
 
         playback_ = std::make_unique<Playback>();
@@ -288,7 +294,7 @@ public:
             pfc::throw_exception_with_message<exception_io_data>(std::string(playback_->Error()).c_str());
         }
 
-        if (playing && Settings<Traits>::Get().render_ahead.get())
+        if (playing && Settings<Traits>::Get().render_ahead_.get())
         {
             ahead_ = std::make_unique<player::RenderAhead>(std::move(playback_));
         }
@@ -500,8 +506,8 @@ private:
     static Options DefaultOptions()
     {
         Options options;
-        options.default_length_ms = static_cast<long long>(Settings<Traits>::Get().default_length.get()) * 1000;
-        options.default_fade_ms = static_cast<long long>(Settings<Traits>::Get().default_fade.get()) * 1000;
+        options.default_length_ms = static_cast<long long>(Settings<Traits>::Get().default_length_.get()) * 1000;
+        options.default_fade_ms = static_cast<long long>(Settings<Traits>::Get().default_fade_.get()) * 1000;
 
         return options;
     }
