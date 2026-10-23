@@ -5,12 +5,15 @@
 
 #include "xsflib/rip/file_names.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <ios>
 #include <string>
 #include <vector>
 
+#include "xsflib/files.h"
 #include "xsflib/rip/tool.h"
 #include "xsflib/testing/check.h"
 #include "xsflib/testing/temp_folder.h"
@@ -83,6 +86,88 @@ void TestNamesDifferInMoreThanCase()
     XSFLIB_CHECK(second_mini == "0001 se_2.minixyz");
 }
 
+// Writes `data` to `path`, as a rip writes a library.
+void WriteBytes(const std::filesystem::path& path, const std::vector<uint8_t>& data)
+{
+    XSFLIB_CHECK(xsflib::rip::WriteFile(path, data));
+}
+
+// A library takes Library's name in a folder that has no file of that name. A file of that name with the same contents
+// keeps the name. A file with other contents, of the same size or another, makes the library take the next name.
+void TestLibraryInFolder()
+{
+    namespace fs = std::filesystem;
+    const xsflib::testing::TempFolder temp("xsflib_library_in_test");
+    const fs::path& dir = temp.Path();
+    const std::vector<uint8_t> kLibrary = {1, 2, 3, 4};
+    WriteBytes(dir / "Same.xyzlib", kLibrary);
+    WriteBytes(dir / "Other_size.xyzlib", {1, 2, 3});
+    WriteBytes(dir / "Other_bytes.xyzlib", {1, 2, 3, 5});
+    fs::create_directory(dir / "Folder.xyzlib");
+    FileNames names(".xyzlib", ".minixyz");
+
+    const std::string no_file = names.LibraryIn(dir, "No file", kLibrary);
+    const std::string same = names.LibraryIn(dir, "Same", kLibrary);
+    const std::string other_size = names.LibraryIn(dir, "Other size", kLibrary);
+    const std::string other_bytes = names.LibraryIn(dir, "Other bytes", kLibrary);
+    const std::string folder = names.LibraryIn(dir, "Folder", kLibrary);
+
+    XSFLIB_CHECK(no_file == "No_file.xyzlib");
+    XSFLIB_CHECK(same == "Same.xyzlib");
+    XSFLIB_CHECK(other_size == "Other_size_2.xyzlib");
+    XSFLIB_CHECK(other_bytes == "Other_bytes_2.xyzlib");
+    XSFLIB_CHECK(folder == "Folder_2.xyzlib");
+}
+
+// Three rips of other sounds into one folder write three libraries. A fourth rip of the second rip's sounds names the
+// second library. The files are larger than the block that the comparison reads. They differ only in their last byte.
+void TestLibrariesOfThreeRips()
+{
+    namespace fs = std::filesystem;
+    const xsflib::testing::TempFolder temp("xsflib_three_libraries_test");
+    const fs::path& dir = temp.Path();
+    std::vector<std::vector<uint8_t>> libraries(3, std::vector<uint8_t>((std::size_t{1} << 20) + 5, 0x5a));
+    libraries[1].back() = 1;
+    libraries[2].back() = 2;
+
+    std::vector<std::string> written;
+    for (const std::vector<uint8_t>& library : libraries)
+    {
+        FileNames names(".xyzlib", ".minixyz");
+        written.push_back(names.LibraryIn(dir, "Game Sound", library));
+        WriteBytes(dir / xsflib::PathFromUtf8(written.back()), library);
+    }
+
+    FileNames names(".xyzlib", ".minixyz");
+    const std::string again = names.LibraryIn(dir, "Game Sound", libraries[1]);
+
+    XSFLIB_CHECK(
+        (written == std::vector<std::string>{"Game_Sound.xyzlib", "Game_Sound_2.xyzlib", "Game_Sound_3.xyzlib"}));
+    XSFLIB_CHECK(again == "Game_Sound_2.xyzlib");
+}
+
+// A name that the run has given out stays taken, even when the folder's file of that name holds the same contents.
+// Library and LibraryIn share the names. A library of one run then never replaces another library of the same run.
+void TestLibraryInTakenName()
+{
+    namespace fs = std::filesystem;
+    const xsflib::testing::TempFolder temp("xsflib_library_in_taken_test");
+    const fs::path& dir = temp.Path();
+    const std::vector<uint8_t> kLibrary = {1, 2, 3, 4};
+    FileNames names(".xyzlib", ".minixyz");
+    const std::string first = names.LibraryIn(dir, "Game Sound", kLibrary);
+    WriteBytes(dir / xsflib::PathFromUtf8(first), kLibrary);
+
+    const std::string second = names.LibraryIn(dir, "Game Sound", kLibrary);
+    const std::string third = names.Library("game sound");
+    const std::string fourth = names.LibraryIn(dir, "GAME SOUND", kLibrary);
+
+    XSFLIB_CHECK(first == "Game_Sound.xyzlib");
+    XSFLIB_CHECK(second == "Game_Sound_2.xyzlib");
+    XSFLIB_CHECK(third == "game_sound_3.xyzlib");
+    XSFLIB_CHECK(fourth == "GAME_SOUND_4.xyzlib");
+}
+
 // The output folder that a rip tool makes next to its input when -o isn't given.
 void TestDefaultOutputDir()
 {
@@ -141,6 +226,9 @@ int main()
     TestArchiveFolders();
     TestReservedNames();
     TestNamesDifferInMoreThanCase();
+    TestLibraryInFolder();
+    TestLibrariesOfThreeRips();
+    TestLibraryInTakenName();
 
     return xsflib::testing::Summary("file name");
 }

@@ -5,7 +5,9 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <set>
+#include <span>
 #include <string>
 
 namespace xsflib::rip
@@ -21,6 +23,14 @@ public:
 
     // "<base><library extension>".
     std::string Library(const std::string& base);
+
+    // The name for the library `library` in `folder`. `folder` is the folder that these names are for. The name is the
+    // one that Library(base) gives, unless `folder` already holds a file of that name with other contents. An earlier
+    // rip may have written that file for its minis. Library(base) then gives the next name to try:
+    // "<base>_2<library extension>", then "_3" and so on. A file of that name is read only when its size equals the
+    // library's.
+    std::string LibraryIn(const std::filesystem::path& folder, const std::string& base,
+                          std::span<const uint8_t> library);
 
     // "<index, four digits> <label><mini extension>".
     std::string Mini(uint32_t index, const std::string& label);
