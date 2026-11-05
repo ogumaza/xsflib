@@ -46,6 +46,10 @@ void TestTimes()
     XSFLIB_CHECK(ParseTime("1:00:00") == 3600000);
     XSFLIB_CHECK(ParseTime(" 0:10.000 ") == 10000);
     XSFLIB_CHECK(ParseTime("1:2:3:4") == -1);
+    XSFLIB_CHECK(ParseTime(":05") == 5000);
+    XSFLIB_CHECK(ParseTime("::05.5") == 5500);
+    XSFLIB_CHECK(ParseTime(":") == -1);
+    XSFLIB_CHECK(ParseTime("5:") == -1);
     XSFLIB_CHECK(ParseTime("-1") == -1);
     XSFLIB_CHECK(ParseTime("nan") == -1);
     XSFLIB_CHECK(ParseTime("inf") == -1);

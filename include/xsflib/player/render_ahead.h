@@ -67,9 +67,17 @@ public:
     // Takes ownership of a started Playback and begins rendering. A track that fits in `keep_frames` has its snapshots
     // disabled. All its rendered audio stays in the buffer.
     template <typename Player>
+        requires(Player::kSampleRate != 0)
     explicit RenderAhead(std::unique_ptr<Playback<Player>> playback,
                          uint64_t keep_frames = KeepFrames(Player::kSampleRate))
         : RenderAhead(FromPlayback(std::move(playback), keep_frames), keep_frames, Player::kSampleRate)
+    {
+    }
+
+    // The same for a player whose rate depends on the set. The limit is KeepFrames at the rate that Start settled.
+    template <typename Player>
+        requires(Player::kSampleRate == 0)
+    explicit RenderAhead(std::unique_ptr<Playback<Player>> playback) : RenderAhead(AtItsRate(std::move(playback)))
     {
     }
 
@@ -158,6 +166,28 @@ private:
         }
 
         return std::make_unique<PlaybackSource<Player>>(std::move(playback));
+    }
+
+    // A source with the limit and the rate that go with it, for a player whose rate depends on the set.
+    struct RatedSource
+    {
+        std::unique_ptr<Source> source;
+        uint64_t keep_frames = 0;
+        int sample_rate = 0;
+    };
+
+    template <typename Player>
+    static RatedSource AtItsRate(std::unique_ptr<Playback<Player>> playback)
+    {
+        const int sample_rate = playback->SampleRate();
+        const uint64_t keep_frames = KeepFrames(sample_rate);
+        std::unique_ptr<Source> source = FromPlayback(std::move(playback), keep_frames);
+
+        return {std::move(source), keep_frames, sample_rate};
+    }
+
+    explicit RenderAhead(RatedSource rated) : RenderAhead(std::move(rated.source), rated.keep_frames, rated.sample_rate)
+    {
     }
 
     void Run();

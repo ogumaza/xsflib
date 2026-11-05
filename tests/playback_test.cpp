@@ -2,7 +2,8 @@
 
 // Tests Playback (xsflib/player/playback.h) with two test players: one that takes snapshots and one that doesn't. Both
 // render a ramp in which every sample shows the frame it came from. The tests cover the length and fade from the tags,
-// the end of an untagged sound, seeks with and without snapshots, and rendering ahead with each player.
+// the end of an untagged sound, seeks with and without snapshots, rendering ahead with each player, and a rate that
+// depends on the set.
 
 #include "xsflib/player/playback.h"
 
@@ -140,6 +141,19 @@ public:
     int restores_ = 0;
 };
 
+// A ramp player whose rate depends on the set: an estimate of 1,000 Hz until it starts, and 2,000 Hz after that.
+template <typename Base>
+class SetRatePlayer : public Base
+{
+public:
+    static constexpr int kSampleRate = 0;
+
+    int SampleRate() const
+    {
+        return Base::GetState() == Base::State::kIdle ? 1000 : 2000;
+    }
+};
+
 static_assert(!HasSnapshots<RampPlayer>);
 static_assert(HasSnapshots<SnapshotRampPlayer>);
 
@@ -252,6 +266,86 @@ void TestRenderAhead(const std::string& what)
     Check(ahead.Error().empty(), what + ": no error");
 }
 
+// The length follows the rate that Start settles.
+void TestSetRateLength()
+{
+    Playback<SetRatePlayer<RampPlayer>> playback;
+    playback.Open(1000, {});
+    const uint64_t estimate = playback.LengthFrames();
+    const int estimated_rate = playback.SampleRate();
+    playback.Start();
+
+    const std::vector<int16_t> left = RenderAll(playback);
+
+    Check(estimated_rate == 1000 && estimate == 1500, "before the start, the length follows the estimate");
+    Check(playback.SampleRate() == 2000 && playback.PlayFrames() == 2000 && playback.FadeFrames() == 1000,
+          "after the start, the length follows the set's rate");
+    Check(left.size() == 3000, "the track's frames at the set's rate");
+    Check(left[1999] == RampSample(1999), "no fade before the fade");
+    Check(left[2500] == RampSample(2500) / 2, "half way through the fade");
+}
+
+// An untagged sound ends half a second at the set's rate after it finishes.
+void TestSetRateUntaggedEnd()
+{
+    Playback<SetRatePlayer<RampPlayer>> playback;
+    playback.Open(-1, {});
+    playback.Start();
+
+    const std::vector<int16_t> left = RenderAll(playback);
+
+    Check(left.size() == 1300, "an untagged sound ends 0.5 s at the set's rate after it finishes");
+}
+
+// The first snapshots come every 2 s at the set's rate, unless the options give another interval.
+void TestSetRateSnapshots()
+{
+    int16_t pcm[2 * 1000];
+    Playback<SetRatePlayer<SnapshotRampPlayer>> by_default;
+    by_default.Open(100000, {});
+    by_default.Start();
+    for (int i = 0; i < 9; i++)
+    {
+        by_default.Render(pcm, 1000);
+    }
+
+    PlaybackOptions<SetRatePlayer<SnapshotRampPlayer>> options;
+    options.snapshot_interval = 1000;
+    Playback<SetRatePlayer<SnapshotRampPlayer>> chosen;
+    chosen.Open(100000, options);
+    chosen.Start();
+    for (int i = 0; i < 9; i++)
+    {
+        chosen.Render(pcm, 1000);
+    }
+
+    // Frames 0, 4,000 and 8,000 by default, and each 1,000 frames with the option.
+    Check(by_default.SnapshotCount() == 3, "2 s between snapshots at the set's rate");
+    Check(chosen.SnapshotCount() == 10, "the options' interval between snapshots");
+}
+
+// Rendering ahead takes its limit and block size from the playback's rate.
+void TestSetRateRenderAhead()
+{
+    auto playback = std::make_unique<Playback<SetRatePlayer<RampPlayer>>>();
+    playback->Open(1000, {});
+    playback->Start();
+    RenderAhead ahead(std::move(playback));
+
+    std::vector<int16_t> left;
+    int16_t pcm[2 * 64];
+    while (const std::size_t n = ahead.Read(pcm, 64))
+    {
+        for (std::size_t i = 0; i < n; i++)
+        {
+            left.push_back(pcm[2 * i]);
+        }
+    }
+
+    Check(left.size() == 3000 && left[1000] == RampSample(1000), "every frame, rendered ahead at the set's rate");
+    Check(ahead.Error().empty(), "no error at the set's rate");
+}
+
 } // namespace
 
 int main()
@@ -262,6 +356,10 @@ int main()
     TestSeekWithSnapshots();
     TestRenderAhead<RampPlayer>("without snapshots");
     TestRenderAhead<SnapshotRampPlayer>("with snapshots");
+    TestSetRateLength();
+    TestSetRateUntaggedEnd();
+    TestSetRateSnapshots();
+    TestSetRateRenderAhead();
 
     return xsflib::testing::Summary("playback");
 }

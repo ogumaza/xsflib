@@ -31,6 +31,9 @@
 // both plugins can define the shared traits in one struct. Both sets of traits derive from that struct. The struct can
 // hold the XMPlay template's kVersion and kAbout too. The component can then pass them to DECLARE_COMPONENT_VERSION as
 // its version and about text.
+//
+// A player whose rate depends on the set (xsflib/player/playback.h) has no rate to show before it starts: reading a
+// file's info doesn't load its libraries. foobar2000 gets the rate from the decoder's dynamic info and from each chunk.
 
 #pragma once
 
@@ -42,6 +45,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -219,7 +223,11 @@ public:
 
         const player::TrackLength length = GetLength();
         p_info.set_length(static_cast<double>(length.play_ms + length.fade_ms) / 1000.0);
-        p_info.info_set_int("samplerate", Playback::kSampleRate);
+        if constexpr (Playback::kSampleRate != 0)
+        {
+            p_info.info_set_int("samplerate", Playback::kSampleRate);
+        }
+
         p_info.info_set_int("channels", 2);
         p_info.info_set_int("bitspersample", 16);
         p_info.info_set("encoding", "synthesized");
@@ -294,6 +302,12 @@ public:
             pfc::throw_exception_with_message<exception_io_data>(std::string(playback_->Error()).c_str());
         }
 
+        if constexpr (Playback::kSampleRate == 0)
+        {
+            set_rate_.rate = playback_->SampleRate();
+            set_rate_.reported = false;
+        }
+
         if (playing && Settings<Traits>::Get().render_ahead_.get())
         {
             ahead_ = std::make_unique<player::RenderAhead>(std::move(playback_));
@@ -329,7 +343,7 @@ public:
             return false;
         }
 
-        p_chunk.set_data_fixedpoint(buffer_.data(), n * 2 * sizeof(int16_t), Playback::kSampleRate, 2, 16,
+        p_chunk.set_data_fixedpoint(buffer_.data(), n * 2 * sizeof(int16_t), SampleRate(), 2, 16,
                                     audio_chunk::channel_config_stereo);
 
         return true;
@@ -337,7 +351,7 @@ public:
 
     void decode_seek(double p_seconds, abort_callback& p_abort)
     {
-        const t_uint64 target = audio_math::time_to_samples(p_seconds, Playback::kSampleRate);
+        const t_uint64 target = audio_math::time_to_samples(p_seconds, SampleRate());
         if (ahead_)
         {
             ahead_->Seek(target); // decode_run waits for the audio there
@@ -356,8 +370,20 @@ public:
         return true;
     }
 
-    bool decode_get_dynamic_info(file_info& /*p_out*/, double& /*p_timestamp_delta*/)
+    bool decode_get_dynamic_info([[maybe_unused]] file_info& p_out, [[maybe_unused]] double& p_timestamp_delta)
     {
+        // A rate that depends on the set isn't in the file's info.
+        if constexpr (Playback::kSampleRate == 0)
+        {
+            if (!set_rate_.reported)
+            {
+                set_rate_.reported = true;
+                p_out.info_set_int("samplerate", set_rate_.rate);
+                p_timestamp_delta = 0;
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -461,6 +487,31 @@ private:
     using Playback = player::Playback<Player>;
     using Options = player::PlaybackOptions<Player>;
 
+    // What decoding keeps for a player whose rate depends on the set: the rate that Start settled, and whether the
+    // dynamic info has given it.
+    struct SetRate
+    {
+        int rate = 0;
+        bool reported = false;
+    };
+
+    struct NoSetRate
+    {
+    };
+
+    // The rate of the frames that decoding gives.
+    unsigned SampleRate() const
+    {
+        if constexpr (Playback::kSampleRate != 0)
+        {
+            return Playback::kSampleRate;
+        }
+        else
+        {
+            return static_cast<unsigned>(set_rate_.rate);
+        }
+    }
+
     // Whether foobar2000 leaves the tag `name` out of the metadata: a PSF tag that isn't metadata, or one of the
     // format's playback tags. Editing the tags leaves these unchanged. A sequence that waits for its variables would go
     // silent if removing the tags dropped them.
@@ -548,6 +599,7 @@ private:
     std::unique_ptr<Playback> playback_;         // when decode_run renders the blocks itself
     std::unique_ptr<player::RenderAhead> ahead_; // owns the Playback while rendering ahead
     std::vector<int16_t> buffer_;
+    [[no_unique_address]] std::conditional_t<Playback::kSampleRate == 0, SetRate, NoSetRate> set_rate_;
 };
 
 } // namespace xsflib::foobar2000

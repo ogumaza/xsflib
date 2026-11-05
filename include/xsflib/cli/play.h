@@ -71,7 +71,7 @@ struct PlayTool
     std::string set_up = "boot";
 
     // What the set holds, such as "2 files", at the start of the summary line of --info. The line then gives the length
-    // and fade.
+    // and fade. It must not start the playback's player.
     std::function<std::string(player::Playback<Player>&)> describe_set;
 
     // Runs once before the first input, after the arguments are checked.
@@ -144,9 +144,9 @@ void PrintInfo(const PlayTool<Player>& tool, player::Playback<Player>& playback)
         std::fprintf(stderr, "%s=%s\n", k.c_str(), v.c_str());
     }
 
-    const auto time = [](uint64_t frames)
+    const auto time = [&playback](uint64_t frames)
     {
-        return FramesToTime(frames, player::Playback<Player>::kSampleRate);
+        return FramesToTime(frames, playback.SampleRate());
     };
 
     std::fprintf(stderr, "%s; length %s + fade %s%s\n", tool.describe_set(playback).c_str(),
@@ -215,7 +215,7 @@ int Render(const PlayTool<Player>& tool, const std::string& in, const std::files
     if (failed)
     {
         std::fprintf(stderr, "error after %.2f s: %s\n",
-                     playback.Position() / static_cast<double>(PlaybackType::kSampleRate), playback.Error().c_str());
+                     playback.Position() / static_cast<double>(playback.SampleRate()), playback.Error().c_str());
         if (pcm.empty())
         {
             return 1;
@@ -226,14 +226,14 @@ int Render(const PlayTool<Player>& tool, const std::string& in, const std::files
     const double boot = std::chrono::duration<double>(t1 - t0).count();
     const double secs = std::chrono::duration<double>(t2 - t1).count();
 
-    if (const auto err = WriteAudio(out.string(), pcm, PlaybackType::kSampleRate))
+    if (const auto err = WriteAudio(out.string(), pcm, static_cast<uint32_t>(playback.SampleRate())))
     {
         std::fprintf(stderr, "error: %s\n", err->c_str());
         return 1;
     }
 
     // The macOS droplet shows the line before "output:" and opens the output's folder.
-    const double audio = pcm.size() / 2.0 / PlaybackType::kSampleRate;
+    const double audio = pcm.size() / 2.0 / playback.SampleRate();
     std::fprintf(stderr, "%s: %.2f s rendered in %.2f s (%.2fx real time) after %.2f s of %s\n",
                  out.filename().string().c_str(), audio, secs, audio / secs, boot, tool.set_up.c_str());
     std::fprintf(stderr, "output: %s\n", std::filesystem::absolute(out).lexically_normal().string().c_str());

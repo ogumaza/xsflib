@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Tests the play tools' frame (xsflib/cli/play.h) with a stand-in player: a render to WAV, --info, a library among the
-// inputs, a folder, and bad arguments. The checks look at exit codes and the files written. DescribeChunks describes a
-// set of memory chunks and files.
+// inputs, a folder, bad arguments, and a rate that depends on the set. The checks look at exit codes and the files
+// written. DescribeChunks describes a set of memory chunks and files.
 
 #include "xsflib/cli/play.h"
 
@@ -128,17 +128,30 @@ private:
     std::string error_;
 };
 
-// Runs the stand-in's play tool with `args` and returns its exit code.
+// A stand-in whose rate depends on the set: 2,000 Hz once it starts.
+class SetRatePlayer : public StandInPlayer
+{
+public:
+    static constexpr int kSampleRate = 0;
+
+    int SampleRate() const
+    {
+        return GetState() == State::kIdle ? 1000 : 2000;
+    }
+};
+
+// Runs a stand-in's play tool with `args` and returns its exit code.
+template <typename Player = StandInPlayer>
 int RunWith(std::vector<std::string> args)
 {
-    xsflib::cli::PlayTool<StandInPlayer> tool;
+    xsflib::cli::PlayTool<Player> tool;
     tool.name = "testplay";
     tool.version = "1.0.0";
     tool.description = "Renders test files.\n";
     tool.library_extension = ".testlib";
     tool.mini_extension = ".minitest";
     tool.a_file = "a test file";
-    tool.describe_set = [](xsflib::player::Playback<StandInPlayer>&)
+    tool.describe_set = [](xsflib::player::Playback<Player>&)
     {
         return std::string("a stand-in set");
     };
@@ -171,10 +184,13 @@ int main()
     const int no_value = RunWith({"--length"});
     const int bad_time = RunWith({"--length", "x", mini.string()});
     const int missing = RunWith({(dir / "missing.minitest").string()});
+    const fs::path set_rate_wav = dir / "set_rate.wav";
+    const int set_rate = RunWith<SetRatePlayer>({"-o", set_rate_wav.string(), mini.string()});
 
     Check(rendered == 0, "a render succeeds");
     Check(fs::exists(dir / "song.wav") && fs::file_size(dir / "song.wav") == 44 + 1000 * 4, "the WAV file holds 1 s");
     Check(info == 0, "--info succeeds");
+    Check(set_rate == 0 && fs::file_size(set_rate_wav) == 44 + 2000 * 4, "a set's rate decides the frames of a render");
     Check(skipped == 0, "a library is skipped");
     Check(folder == 1, "a folder fails");
     Check(no_value == 2 && bad_time == 2, "bad arguments exit with 2");

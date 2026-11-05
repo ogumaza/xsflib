@@ -215,9 +215,10 @@ long long ParseTime(const std::string& text)
     long long whole = 0; // hours and minutes, in minutes
     for (std::size_t i = 0; i + 1 < parts.size(); i++)
     {
+        // An empty field counts as 0. Real tags hold times such as ":05".
         char* end = nullptr;
         const long long v = std::strtoll(parts[i].c_str(), &end, 10);
-        if (parts[i].empty() || *end || v < 0 || v > kMaxTimeField)
+        if (*end || v < 0 || v > kMaxTimeField)
         {
             return -1;
         }

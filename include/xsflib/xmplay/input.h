@@ -42,6 +42,7 @@
 #include <xmpin.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -371,6 +372,11 @@ private:
                 return 0;
             }
 
+            if constexpr (Playback::kSampleRate == 0)
+            {
+                set_rate_ = playback->SampleRate();
+            }
+
             const player::TrackLength length = LengthOf(psf.tags, settings);
             if (settings.render_ahead)
             {
@@ -405,6 +411,19 @@ private:
         CloseTrack();
     }
 
+    // The rate of the open track's frames.
+    static int SampleRate()
+    {
+        if constexpr (Playback::kSampleRate != 0)
+        {
+            return Playback::kSampleRate;
+        }
+        else
+        {
+            return set_rate_.load();
+        }
+    }
+
     // The format of Process's samples: stereo at the player's rate, from 16-bit samples.
     static void WINAPI SetFormat(XMPFORMAT* format)
     {
@@ -413,7 +432,7 @@ private:
             return;
         }
 
-        format->rate = static_cast<DWORD>(Playback::kSampleRate);
+        format->rate = static_cast<DWORD>(SampleRate());
         format->chan = 2;
         format->res = 2;
     }
@@ -437,7 +456,7 @@ private:
     {
         if (format != nullptr)
         {
-            std::snprintf(format, 64, "%s - %d Hz", Traits::kName, Playback::kSampleRate);
+            std::snprintf(format, 64, "%s - %d Hz", Traits::kName, SampleRate());
         }
     }
 
@@ -452,7 +471,7 @@ private:
         try
         {
             std::string text = "Format\t" + std::string(Traits::kName) + "\r";
-            text += "Sample rate\t" + std::to_string(Playback::kSampleRate) + " Hz\r";
+            text += "Sample rate\t" + std::to_string(SampleRate()) + " Hz\r";
             text += "Channels\t2\rResolution\t16 bit\r";
             {
                 std::lock_guard lock(track_mutex_);
@@ -529,8 +548,7 @@ private:
 
         try
         {
-            const uint64_t frame =
-                static_cast<uint64_t>(position) * static_cast<uint64_t>(Playback::kSampleRate) / 1000;
+            const uint64_t frame = static_cast<uint64_t>(position) * static_cast<uint64_t>(SampleRate()) / 1000;
             if (ahead_)
             {
                 ahead_->Seek(frame); // Process waits for the audio there
@@ -542,7 +560,7 @@ private:
                 return -1;
             }
 
-            return static_cast<double>(playback_->Position()) / Playback::kSampleRate;
+            return static_cast<double>(playback_->Position()) / SampleRate();
         }
         catch (...)
         {
@@ -872,6 +890,7 @@ private:
     inline static std::unique_ptr<Playback> playback_;         // when Process renders the blocks itself
     inline static std::unique_ptr<player::RenderAhead> ahead_; // owns the Playback while rendering ahead
     inline static std::vector<int16_t> buffer_;
+    inline static std::atomic<int> set_rate_{0}; // for a player whose rate depends on the set, what Start settled
 
     // The open track's tags and length, which the info functions read on other threads.
     inline static std::mutex track_mutex_;

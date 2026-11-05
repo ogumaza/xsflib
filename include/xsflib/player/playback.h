@@ -12,6 +12,10 @@
 // The player type provides kSampleRate, Load (from a path and a reader, or from a loaded set), Start, Render, Volume,
 // LengthMs, FadeMs, GetState with State::kPlaying, kFinished and kError, FinishedFrame, GetTags and Error. A player
 // with snapshots also provides a Snapshot type, Save and Restore.
+//
+// The rate of a format may differ from set to set. Such a player sets kSampleRate to 0 and provides SampleRate(): the
+// rate of the frames that it renders, never 0. Before Start, SampleRate() may give an estimate. Start settles it, and
+// the rate stays the same until the next Start. The playback then works out the length again.
 
 #pragma once
 
@@ -79,7 +83,8 @@ struct PlaybackOptions
     bool snapshots = true;
 
     // Initial interval between snapshots, in frames: a seek renders up to this much. Shorter intervals reduce rendering
-    // time when seeking. They cost more time and memory spent saving states.
+    // time when seeking. They cost more time and memory spent saving states. For a player whose rate depends on the
+    // set, 0 means 2 seconds at the set's rate.
     uint64_t snapshot_interval = 2 * static_cast<uint64_t>(Player::kSampleRate);
 
     // Maximum number of snapshots. Past it, the playback doubles the interval and discards every other snapshot. Memory
@@ -113,6 +118,7 @@ template <typename Player>
 class Playback
 {
 public:
+    // The player's rate, or 0 when the rate depends on the set (see SampleRate).
     static constexpr int kSampleRate = Player::kSampleRate;
 
     // Loads a file and its libraries, without starting the player.
@@ -135,11 +141,18 @@ public:
         position_ = 0;
         finished_at_.reset();
         DropSnapshots();
-        interval_ = std::max<uint64_t>(options_.snapshot_interval, 1);
+        interval_ = FirstInterval();
 
         if (!player_.Start())
         {
             return false;
+        }
+
+        // A rate that depends on the set is settled now.
+        if constexpr (kSampleRate == 0)
+        {
+            ComputeLength();
+            interval_ = FirstInterval();
         }
 
         SaveIfDue();
@@ -159,7 +172,7 @@ public:
             // A sound without a length tag ends half a second after it reports that it finished.
             if (!tagged_ && finished_at_)
             {
-                end = std::min(end, *finished_at_ + kSampleRate / 2);
+                end = std::min(end, *finished_at_ + static_cast<uint64_t>(SampleRate()) / 2);
             }
 
             if (position_ >= end)
@@ -277,6 +290,20 @@ public:
         return saved_.size();
     }
 
+    // The rate of the frames that Render writes. For a player whose rate depends on the set, the rate before Start may
+    // be an estimate.
+    int SampleRate() const
+    {
+        if constexpr (kSampleRate != 0)
+        {
+            return kSampleRate;
+        }
+        else
+        {
+            return player_.SampleRate();
+        }
+    }
+
     // Current position in frames.
     uint64_t Position() const
     {
@@ -343,9 +370,23 @@ private:
 
     static constexpr std::size_t kSeekBlock = 4096; // frames rendered at a time while seeking
 
-    static uint64_t MsToFrames(long long ms)
+    uint64_t MsToFrames(long long ms) const
     {
-        return ms <= 0 ? 0 : static_cast<uint64_t>(ms) * kSampleRate / 1000;
+        return ms <= 0 ? 0 : static_cast<uint64_t>(ms) * static_cast<uint64_t>(SampleRate()) / 1000;
+    }
+
+    // The interval between snapshots at the start of a run.
+    uint64_t FirstInterval() const
+    {
+        if constexpr (kSampleRate == 0)
+        {
+            if (options_.snapshot_interval == 0)
+            {
+                return 2 * static_cast<uint64_t>(SampleRate());
+            }
+        }
+
+        return std::max<uint64_t>(options_.snapshot_interval, 1);
     }
 
     // Takes `options`, drops the snapshots of the set before, and loads a set with `load`. The length then follows from
