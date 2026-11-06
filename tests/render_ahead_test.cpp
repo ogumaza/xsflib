@@ -3,7 +3,8 @@
 // Tests rendering ahead (xsflib/player/render_ahead.h) with a test source that generates samples from a formula. Reads
 // must return the correct samples, seeks within the buffer must not move the source, and the buffer must stay within
 // its memory limit. Errors must reach the reader after any preceding audio. Reads and the worker must stop on request.
-// A random test covers combinations of reads and seeks across many tracks.
+// The first read after the start or a seek must wait for the pre-roll. A random test covers combinations of reads and
+// seeks across many tracks, with and without a pre-roll.
 //
 // usage: xsflib_render_ahead_test [rounds of the random test]
 
@@ -186,9 +187,9 @@ private:
 };
 
 std::unique_ptr<RenderAhead> Make(const Settings& settings, Counts& counts,
-                                  uint64_t keep = RenderAhead::KeepFrames(kRate))
+                                  uint64_t keep = RenderAhead::KeepFrames(kRate), uint64_t pre_roll = 0)
 {
-    return std::make_unique<RenderAhead>(std::make_unique<FakeSource>(settings, counts), keep, kRate);
+    return std::make_unique<RenderAhead>(std::make_unique<FakeSource>(settings, counts), keep, kRate, pre_roll);
 }
 
 // Reads up to `frames` frames in chunks of at most `chunk`. Checks the samples against the track from `from` on.
@@ -436,11 +437,94 @@ void TestStopWhileBusy()
     }
 }
 
-// Varies track settings, buffer limits, seek targets and read sizes at random. Checks the samples from every read and
-// verifies that the buffer stays within its memory limit.
-void TestRandom(int rounds)
+// The first read after the start or a seek waits until the pre-roll is buffered after the read position. It reads
+// sooner at the end of the track or after an error. A seek into audio that is buffered far enough needs no wait.
+void TestPreRoll()
 {
-    std::mt19937_64 rng(2026);
+    constexpr uint64_t kRoll = 20000;
+
+    // The source renders a chunk of 1,024 frames each 0.5 ms. Without the pre-roll, the first read would return after
+    // about one chunk.
+    {
+        Counts counts;
+        Settings settings = Track(1000000);
+        settings.delay = std::chrono::microseconds(500);
+        auto ahead = Make(settings, counts, 50000, kRoll);
+
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 0, 1000, 1000, "pre-roll at the start") == 1000);
+        XSFLIB_CHECK(ahead->GetKept().end >= kRoll);
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 1000, 100000, 1024, "pre-roll, then playback") == 100000);
+
+        // A seek back before the buffer moves the source. The read after it waits for the pre-roll again.
+        ahead->Seek(5000);
+
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 5000, 1000, 1000, "pre-roll after a seek") == 1000);
+        XSFLIB_CHECK(ahead->GetKept().end >= 5000 + kRoll);
+        XSFLIB_CHECK(counts.seeks == 1);
+
+        // The buffer then fills to its limit. A seek into it has the pre-roll after it already.
+        const RenderAhead::Kept kept = WaitForKept(*ahead, 6000 + 50000);
+        ahead->Seek(16000);
+
+        XSFLIB_CHECK(kept.end >= 16000 + kRoll);
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 16000, 20000, 1024, "a seek into the buffer") == 20000);
+        XSFLIB_CHECK(counts.seeks == 1);
+    }
+
+    // A track shorter than the pre-roll plays whole.
+    {
+        Counts counts;
+        auto ahead = Make(Track(5000), counts, 50000, kRoll);
+
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 0, 10000, 1024, "a track shorter than the pre-roll") == 5000);
+        XSFLIB_CHECK(ahead->Error().empty());
+    }
+
+    // Audio before an error plays, then the error.
+    {
+        Counts counts;
+        Settings settings = Track(100000);
+        settings.fail_at = 8000;
+        auto ahead = Make(settings, counts, 50000, kRoll);
+
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 0, 10000, 1024, "an error before the end of the pre-roll") == 8000);
+        XSFLIB_CHECK(!ahead->Error().empty());
+    }
+
+    // A pre-roll over the buffer limit is cut to the limit. The worker stops there.
+    {
+        Counts counts;
+        auto ahead = Make(Track(100000), counts, 5000, kRoll);
+
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 0, 1000, 1000, "a pre-roll over the limit") == 1000);
+        XSFLIB_CHECK(ahead->GetKept().end >= 5000);
+        XSFLIB_CHECK(ReadAndCheck(*ahead, 1000, 100000, 1024, "a pre-roll over the limit, then playback") == 99000);
+    }
+
+    // A read that waits for the pre-roll stops on request.
+    {
+        Counts counts;
+        Settings settings = Track(100000000);
+        settings.delay = std::chrono::milliseconds(2);
+        auto ahead = Make(settings, counts, RenderAhead::KeepFrames(kRate), RenderAhead::KeepFrames(kRate));
+        int16_t pcm[2048];
+
+        const auto t0 = Clock::now();
+        const std::size_t n = ahead->Read(pcm, 1024, [&] { return Clock::now() - t0 > std::chrono::milliseconds(50); });
+        const auto waited = Clock::now() - t0;
+
+        XSFLIB_CHECK(n == 0);
+        XSFLIB_CHECK(waited < std::chrono::seconds(2));
+    }
+}
+
+// Varies track settings, buffer limits, seek targets and read sizes at random. Checks the samples from every read and
+// verifies that the buffer stays within its memory limit. With `pre_roll`, each round from another seed also has a
+// pre-roll of up to 20,000 frames, at times over the buffer limit. The first read after the start or a seek must then
+// find the pre-roll buffered after it, or the end of the track or an error.
+void TestRandom(int rounds, bool pre_roll)
+{
+    std::mt19937_64 rng(pre_roll ? 2027 : 2026);
     for (int round = 0; round < rounds; round++)
     {
         Settings settings;
@@ -461,13 +545,16 @@ void TestRandom(int rounds)
         }
 
         const uint64_t keep = rng() % 3 ? 1 + rng() % 100000 : RenderAhead::KeepFrames(kRate);
+        const uint64_t roll = pre_roll ? rng() % 20000 : 0;
         const uint64_t limit = std::min(settings.length, settings.fail_at.value_or(UINT64_MAX));
         const bool fails = settings.fail_at && *settings.fail_at <= settings.length;
-        const std::string what = "random round " + std::to_string(round);
+        const std::string what =
+            std::string(pre_roll ? "random round with a pre-roll " : "random round ") + std::to_string(round);
 
         Counts counts;
-        auto ahead = Make(settings, counts, keep);
+        auto ahead = Make(settings, counts, keep, roll);
         uint64_t position = 0;
+        bool first = true; // the next read is the first to return audio since the start or a seek
         std::vector<int16_t> pcm(2 * 5000);
         for (int op = 0; op < 60 && !failures; op++)
         {
@@ -475,6 +562,7 @@ void TestRandom(int rounds)
             {
                 position = rng() % (settings.length + 2000);
                 ahead->Seek(position);
+                first = true;
                 if (rng() % 2)
                 {
                     Delay(std::chrono::microseconds(rng() % 2000));
@@ -494,6 +582,14 @@ void TestRandom(int rounds)
             }
 
             Check(n <= frames && position + n <= limit, what + ": read stays within requested and available frames");
+
+            // The buffer's end moves only forwards until the next seek. It was at least this far when Read returned.
+            if (first)
+            {
+                Check(ahead->GetKept().end >= std::min(position + std::min(roll, keep), limit),
+                      what + ": the first read after the start or a seek waits for the pre-roll");
+                first = false;
+            }
             for (std::size_t i = 0; i < n; i++)
             {
                 if (pcm[2 * i] != Sample(position + i, 0) || pcm[2 * i + 1] != Sample(position + i, 1))
@@ -528,7 +624,9 @@ int main(int argc, char** argv)
     TestError();
     TestAbort();
     TestStopWhileBusy();
-    TestRandom(rounds);
+    TestPreRoll();
+    TestRandom(rounds, false);
+    TestRandom(rounds, true);
 
     return xsflib::testing::Summary("render ahead");
 }

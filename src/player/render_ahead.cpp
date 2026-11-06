@@ -35,8 +35,12 @@ std::size_t BlockFrames(uint64_t keep_frames, int sample_rate)
 
 } // namespace
 
-RenderAhead::RenderAhead(std::unique_ptr<Source> source, uint64_t keep_frames, int sample_rate)
-    : source_(std::move(source)), keep_(std::max<uint64_t>(keep_frames, 1)), block_(BlockFrames(keep_, sample_rate))
+RenderAhead::RenderAhead(std::unique_ptr<Source> source, uint64_t keep_frames, int sample_rate,
+                         uint64_t pre_roll_frames)
+    : source_(std::move(source)),
+      keep_(std::max<uint64_t>(keep_frames, 1)),
+      block_(BlockFrames(keep_, sample_rate)),
+      pre_roll_(std::min(pre_roll_frames, keep_))
 {
     start_ = end_ = read_ = source_->Position();
     thread_ = std::thread(&RenderAhead::Run, this);
@@ -63,20 +67,24 @@ std::size_t RenderAhead::Read(int16_t* out, std::size_t frames, const std::funct
     std::unique_lock lock(mutex_);
     while (true)
     {
-        if (read_ >= start_ && read_ < end_)
+        // Once the worker handles the latest seek, ended_ and error_ say whether more is coming. The worker stops
+        // rendering at keep_ frames ahead. The pre-roll is at most keep_, so the worker always renders that far.
+        const bool settled = handled_ == seeks_ && read_ >= start_;
+        const bool no_more = done_ || (settled && (ended_ || !error_.empty()));
+        if (read_ >= start_ && read_ < end_ && (rolling_ || end_ - read_ >= pre_roll_ || no_more))
         {
             const auto n = static_cast<std::size_t>(std::min<uint64_t>(frames, end_ - read_));
             Copy(out, read_, n);
             read_ += n;
+            rolling_ = true;
             lock.unlock();
             wanted_.notify_one(); // the worker may have room to render more
 
             return n;
         }
 
-        // No audio here yet. Once the worker handles the latest seek, ended_ and error_ say whether more is coming.
-        const bool settled = handled_ == seeks_ && read_ >= start_;
-        if (done_ || (settled && (ended_ || !error_.empty())))
+        // No audio here yet, or less than the pre-roll.
+        if (no_more)
         {
             return 0;
         }
@@ -102,6 +110,7 @@ void RenderAhead::Seek(uint64_t frame)
     {
         std::lock_guard lock(mutex_);
         read_ = frame;
+        rolling_ = false;
         seeks_++;
     }
 

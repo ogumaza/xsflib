@@ -7,8 +7,9 @@
 // options page.
 //
 // The format's player does the emulation. By default the plugin renders ahead on a worker thread and buffers the audio
-// (see xsflib/player/render_ahead.h). Seeks within the buffer are instant. Seeks further ahead wait for rendering to
-// reach the target. A player with snapshots takes them every few seconds on tracks longer than the buffer. Seeking back
+// (see xsflib/player/render_ahead.h). At the start and after a seek, playback waits until three seconds are buffered,
+// or until the track ends. Seeks well within the buffer are instant. Seeks further ahead wait for rendering to reach
+// the target. A player with snapshots takes them every few seconds on tracks longer than the buffer. Seeking back
 // before the buffered audio then restores the latest snapshot before the target and renders from there. Without
 // snapshots, such a seek renders from the start of the track. With rendering ahead turned off, Process renders each
 // block itself. A player with snapshots then takes them on every track.

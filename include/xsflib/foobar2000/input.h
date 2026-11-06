@@ -5,7 +5,8 @@
 // decoder. The tags can be edited.
 //
 // The format's player does the emulation. While playing, the component renders ahead on a worker thread and buffers the
-// audio (see xsflib/player/render_ahead.h). Seeks within the buffer are instant. Seeks further ahead wait for rendering
+// audio (see xsflib/player/render_ahead.h). At the start and after a seek, playback waits until three seconds are
+// buffered, or until the track ends. Seeks well within the buffer are instant. Seeks further ahead wait for rendering
 // to reach the target. A player with snapshots takes them every few seconds on tracks longer than the buffer. Seeking
 // back before the buffered audio then restores the latest snapshot before the target and renders from there. Without
 // snapshots, such a seek renders from the start of the track. With rendering ahead turned off, decode_run renders each

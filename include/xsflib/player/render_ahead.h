@@ -9,6 +9,12 @@
 // one core busy until it reaches the end of the track or the buffer limit. Buffered audio uses about 7.3 MiB per minute
 // at 32,000 Hz.
 //
+// Playback starts after a pre-roll. After the start and after each seek, Read waits until the pre-roll's frames are
+// buffered ahead of the read position, or until the track ends or fails. Playback then starts with a few seconds of
+// lead. Without the pre-roll, the lead would start at one chunk. A slow second early in a track could then run the
+// program's output dry, even in a track that renders faster than real time on average. A seek into audio that is
+// already buffered, with the pre-roll's length after it, is still instant.
+//
 // A foobar2000 component or an XMPlay plugin reads the buffer on its decoding thread.
 
 #pragma once
@@ -65,24 +71,27 @@ public:
     };
 
     // Takes ownership of a started Playback and begins rendering. A track that fits in `keep_frames` has its snapshots
-    // disabled. All its rendered audio stays in the buffer.
+    // disabled. All its rendered audio stays in the buffer. The pre-roll is PreRollFrames.
     template <typename Player>
         requires(Player::kSampleRate != 0)
     explicit RenderAhead(std::unique_ptr<Playback<Player>> playback,
                          uint64_t keep_frames = KeepFrames(Player::kSampleRate))
-        : RenderAhead(FromPlayback(std::move(playback), keep_frames), keep_frames, Player::kSampleRate)
+        : RenderAhead(FromPlayback(std::move(playback), keep_frames), keep_frames, Player::kSampleRate,
+                      PreRollFrames(Player::kSampleRate))
     {
     }
 
-    // The same for a player whose rate depends on the set. The limit is KeepFrames at the rate that Start settled.
+    // The same for a player whose rate depends on the set. The limit and the pre-roll are KeepFrames and PreRollFrames
+    // at the rate that Start settled.
     template <typename Player>
         requires(Player::kSampleRate == 0)
     explicit RenderAhead(std::unique_ptr<Playback<Player>> playback) : RenderAhead(AtItsRate(std::move(playback)))
     {
     }
 
-    // Takes ownership of a source that renders at `sample_rate`, and starts rendering from its current position.
-    RenderAhead(std::unique_ptr<Source> source, uint64_t keep_frames, int sample_rate);
+    // Takes ownership of a source that renders at `sample_rate`, and starts rendering from its current position. Read
+    // waits for `pre_roll_frames` after the start and after each seek. A pre-roll over `keep_frames` is cut to it.
+    RenderAhead(std::unique_ptr<Source> source, uint64_t keep_frames, int sample_rate, uint64_t pre_roll_frames = 0);
 
     RenderAhead(const RenderAhead&) = delete;
     RenderAhead& operator=(const RenderAhead&) = delete;
@@ -98,13 +107,21 @@ public:
         return 610 * static_cast<uint64_t>(sample_rate);
     }
 
+    // The pre-roll at `sample_rate`: 3 seconds. A track that renders at twice real time then plays 1.5 s after its
+    // start or a seek.
+    static constexpr uint64_t PreRollFrames(int sample_rate)
+    {
+        return 3 * static_cast<uint64_t>(sample_rate);
+    }
+
     // Copies up to `frames` stereo frames (interleaved L, R) from the read position into `out`. Moves the read position
-    // past them. Waits, polling `abort`, until the worker has rendered at least one frame. Returns the number of frames
-    // copied. That's 0 at the end of the track, after an error (see Error()) or when `abort` returned true.
+    // past them. Waits, polling `abort`, until the worker has rendered at least one frame. The first Read after the
+    // start or a seek waits for the pre-roll instead. Returns the number of frames copied. That's 0 at the end of the
+    // track, after an error (see Error()) or when `abort` returned true.
     std::size_t Read(int16_t* out, std::size_t frames, const std::function<bool()>& abort = {});
 
-    // Moves the read position to `frame` and returns immediately. If the frame isn't buffered, the next Read waits for
-    // it.
+    // Moves the read position to `frame` and returns immediately. The next Read waits until the pre-roll is buffered
+    // from `frame` on.
     void Seek(uint64_t frame);
 
     // The read position.
@@ -168,12 +185,13 @@ private:
         return std::make_unique<PlaybackSource<Player>>(std::move(playback));
     }
 
-    // A source with the limit and the rate that go with it, for a player whose rate depends on the set.
+    // A source with the limit, the rate and the pre-roll that go with it, for a player whose rate depends on the set.
     struct RatedSource
     {
         std::unique_ptr<Source> source;
         uint64_t keep_frames = 0;
         int sample_rate = 0;
+        uint64_t pre_roll_frames = 0;
     };
 
     template <typename Player>
@@ -183,10 +201,11 @@ private:
         const uint64_t keep_frames = KeepFrames(sample_rate);
         std::unique_ptr<Source> source = FromPlayback(std::move(playback), keep_frames);
 
-        return {std::move(source), keep_frames, sample_rate};
+        return {std::move(source), keep_frames, sample_rate, PreRollFrames(sample_rate)};
     }
 
-    explicit RenderAhead(RatedSource rated) : RenderAhead(std::move(rated.source), rated.keep_frames, rated.sample_rate)
+    explicit RenderAhead(RatedSource rated)
+        : RenderAhead(std::move(rated.source), rated.keep_frames, rated.sample_rate, rated.pre_roll_frames)
     {
     }
 
@@ -211,6 +230,7 @@ private:
     std::unique_ptr<Source> source_;
     const uint64_t keep_;
     const std::size_t block_; // frames per buffer block
+    const uint64_t pre_roll_; // frames buffered ahead before the first Read after the start or a seek returns
 
     mutable std::mutex mutex_;
     std::condition_variable rendered_; // the worker has rendered, reached the end, failed, moved or stopped
@@ -222,6 +242,7 @@ private:
     uint64_t end_ = 0;     // the source's position, except while the worker moves it
     uint64_t read_ = 0;    // the read position
     uint64_t handled_ = 0; // latest seek handled by the worker
+    bool rolling_ = false; // Read has returned audio since the start or the latest seek
     bool ended_ = false;
     bool done_ = false; // the worker has exited
     std::string error_;
