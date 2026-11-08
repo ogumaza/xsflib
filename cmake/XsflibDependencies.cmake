@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 
 # The libraries that xsflib provides: with XSFLIB_PSF zlib (the PSF container), with XSFLIB_DISC_LIBRARIES zlib,
-# Zstandard, liblzma and bzip2 (for a library that reads disc images), with XSFLIB_ZSTD Zstandard alone, and with
-# XSFLIB_CLI libFLAC (FLAC output). Installed libraries are used where they exist. Otherwise each library is downloaded
-# and built with xsflib. A universal macOS build (more than one architecture in CMAKE_OSX_ARCHITECTURES) builds
-# Zstandard, liblzma and libFLAC from source. Installed copies, such as those from Homebrew, are built for the Mac's
-# architecture only. zlib and bzip2 come with macOS for every architecture.
+# Zstandard, liblzma and bzip2 (for a library that reads disc images), with XSFLIB_ZSTD Zstandard alone, with
+# XSFLIB_ZLIB zlib alone (for the ROM sets), and with XSFLIB_CLI libFLAC (FLAC output). Installed libraries are used
+# where they exist. Otherwise each library is downloaded and built with xsflib. A universal macOS build (more than one
+# architecture in CMAKE_OSX_ARCHITECTURES) builds Zstandard, liblzma and libFLAC from source. Installed copies, such as
+# those from Homebrew, are built for the Mac's architecture only. zlib and bzip2 come with macOS for every
+# architecture.
 #
 # Each library is also available as xsflib::zlib, xsflib::zstd, xsflib::lzma, xsflib::bzip2 and xsflib::flac. A
 # project that uses xsflib links those rather than finding the libraries again.
@@ -37,7 +38,7 @@ function(xsflib_make_global target)
 endfunction()
 
 # zlib.
-if (XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES)
+if (XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES OR XSFLIB_ZLIB)
     if (NOT TARGET ZLIB::ZLIB)
         find_package(ZLIB QUIET)
     endif()

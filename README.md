@@ -15,6 +15,7 @@ Each module is a static library. A project links the ones it uses.
 | `xsflib::player` | A template of playback with length, fade and seeking on a format's player. Also the parts that every format's player shares, and rendering ahead on a worker thread |
 | `xsflib::cli` | WAV and FLAC output and the frames of a format's play tool and rip tool. It links `xsflib::console` |
 | `xsflib::rip` | The names of a rip's files, functions for rip tools, and the length analysis that times a sequence on a model of a game's sound code |
+| `xsflib::rom_set` | The ROM sets of arcade boards: a reader of ZIP archives, and a loader that finds a game's chips by SHA-1 and size in an archive or a folder and puts the image together. Requires zlib, and is built when `xsflib::zlib` exists |
 
 `include/xsflib/foobar2000/input.h` is a foobar2000 input component as a template on a format's traits.
 `include/xsflib/xmplay/input.h` is an XMPlay input plugin as a template on a format's traits. `xsflib::testing` holds
@@ -73,6 +74,7 @@ differ from the one that CMake downloads. The decompressed programs and the audi
 | `XSFLIB_PSF` | on when built alone | `xsflib::psf` and the player framework. Requires zlib. |
 | `XSFLIB_CLI` | on when built alone | `xsflib::cli`, WAV and FLAC output. Requires libFLAC. |
 | `XSFLIB_ZSTD` | off | Zstandard alone, as `xsflib::zstd`. |
+| `XSFLIB_ZLIB` | off | zlib alone, as `xsflib::zlib`, for `xsflib::rom_set`. |
 | `XSFLIB_DISC_LIBRARIES` | off | zlib, Zstandard, liblzma and bzip2, as `xsflib::zlib`, `xsflib::zstd`, `xsflib::lzma` and `xsflib::bzip2`, for a library that reads disc images. |
 | `XSFLIB_TESTS` | on when built alone | The tests, registered with CTest. |
 | `XSFLIB_INSTALL` | off | Installs the headers, the libraries and the CMake package. Requires installed copies of the libraries above. |

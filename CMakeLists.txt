@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
-project(xsflib VERSION 1.8.0 LANGUAGES C CXX)
+project(xsflib VERSION 1.9.0 LANGUAGES C CXX)
 
 # CMake 3.20 has no PROJECT_IS_TOP_LEVEL. xsflib is the top-level project when the build starts in its folder.
 if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -14,6 +14,7 @@ option(XSFLIB_PSF "Build xsflib::psf and the player framework. They require zlib
 option(XSFLIB_CLI "Build xsflib::cli. Its FLAC output requires libFLAC." ${XSFLIB_TOP_LEVEL})
 option(XSFLIB_DISC_LIBRARIES "Find zlib, Zstandard, liblzma and bzip2 for a library that reads disc images." OFF)
 option(XSFLIB_ZSTD "Provide Zstandard alone as xsflib::zstd." OFF)
+option(XSFLIB_ZLIB "Provide zlib alone as xsflib::zlib, for xsflib::rom_set." OFF)
 option(XSFLIB_TESTS "Build xsflib's tests and register them with CTest." ${XSFLIB_TOP_LEVEL})
 option(XSFLIB_INSTALL "Install xsflib's headers, libraries and CMake package. Requires installed dependencies." OFF)
 
@@ -111,6 +112,13 @@ xsflib_add_library(rip src/rip/file_names.cpp src/rip/length.cpp src/rip/tool.cp
 target_link_libraries(xsflib_rip PUBLIC xsflib::common)
 xsflib_add_test(file_names xsflib::rip)
 xsflib_add_test(rip_length xsflib::rip)
+
+# The ROM sets of arcade boards, as ZIP archives or folders of their chips. The reader of ZIP archives requires zlib.
+if (TARGET xsflib::zlib)
+    xsflib_add_library(rom_set src/rip/rom_set.cpp src/rip/zip.cpp)
+    target_link_libraries(xsflib_rom_set PUBLIC xsflib::common PRIVATE xsflib::zlib)
+    xsflib_add_test(rom_set xsflib::rom_set)
+endif()
 
 # Tests that use locally supplied files, from a local_tests.cmake in a folder of the source tree.
 if (XSFLIB_TOP_LEVEL AND XSFLIB_TESTS)
