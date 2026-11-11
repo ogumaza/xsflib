@@ -518,6 +518,43 @@ void TestPreRoll()
     }
 }
 
+// Random settings of a track for TestRandom: up to 300,000 frames, with snapshots, a failure and a delay at times.
+Settings RandomSettings(std::mt19937_64& rng)
+{
+    Settings settings;
+    settings.length = 1 + rng() % 300000;
+    if (rng() % 2)
+    {
+        settings.interval = 1 + rng() % 20000;
+    }
+
+    if (rng() % 4 == 0)
+    {
+        settings.fail_at = rng() % (settings.length + 1000);
+    }
+
+    if (rng() % 3 == 0)
+    {
+        settings.delay = std::chrono::microseconds(rng() % 200);
+    }
+
+    return settings;
+}
+
+// The first of the `frames` frames in `pcm` that differs from the track, which `pcm` holds from `position`, or nothing.
+std::optional<uint64_t> FirstDifference(const std::vector<int16_t>& pcm, uint64_t position, std::size_t frames)
+{
+    for (std::size_t i = 0; i < frames; i++)
+    {
+        if (pcm[2 * i] != Sample(position + i, 0) || pcm[2 * i + 1] != Sample(position + i, 1))
+        {
+            return position + i;
+        }
+    }
+
+    return std::nullopt;
+}
+
 // Varies track settings, buffer limits, seek targets and read sizes at random. Checks the samples from every read and
 // verifies that the buffer stays within its memory limit. With `pre_roll`, each round from another seed also has a
 // pre-roll of up to 20,000 frames, at times over the buffer limit. The first read after the start or a seek must then
@@ -527,23 +564,7 @@ void TestRandom(int rounds, bool pre_roll)
     std::mt19937_64 rng(pre_roll ? 2027 : 2026);
     for (int round = 0; round < rounds; round++)
     {
-        Settings settings;
-        settings.length = 1 + rng() % 300000;
-        if (rng() % 2)
-        {
-            settings.interval = 1 + rng() % 20000;
-        }
-
-        if (rng() % 4 == 0)
-        {
-            settings.fail_at = rng() % (settings.length + 1000);
-        }
-
-        if (rng() % 3 == 0)
-        {
-            settings.delay = std::chrono::microseconds(rng() % 200);
-        }
-
+        const Settings settings = RandomSettings(rng);
         const uint64_t keep = rng() % 3 ? 1 + rng() % 100000 : RenderAhead::KeepFrames(kRate);
         const uint64_t roll = pre_roll ? rng() % 20000 : 0;
         const uint64_t limit = std::min(settings.length, settings.fail_at.value_or(UINT64_MAX));
@@ -590,13 +611,9 @@ void TestRandom(int rounds, bool pre_roll)
                       what + ": the first read after the start or a seek waits for the pre-roll");
                 first = false;
             }
-            for (std::size_t i = 0; i < n; i++)
+            if (const std::optional<uint64_t> differs = FirstDifference(pcm, position, n))
             {
-                if (pcm[2 * i] != Sample(position + i, 0) || pcm[2 * i + 1] != Sample(position + i, 1))
-                {
-                    Check(false, what + ": frame " + std::to_string(position + i) + " matches the track");
-                    break;
-                }
+                Check(false, what + ": frame " + std::to_string(*differs) + " matches the track");
             }
 
             position += n;
@@ -615,18 +632,21 @@ int main(int argc, char** argv)
 {
     const int rounds = argc > 1 ? std::atoi(argv[1]) : 200;
 
-    TestStraight();
-    TestSeeksIntoKept();
-    TestKeepLimit();
-    TestSeekBack(0);
-    TestSeekBack(10000);
-    TestSeekPastKept();
-    TestError();
-    TestAbort();
-    TestStopWhileBusy();
-    TestPreRoll();
-    TestRandom(rounds, false);
-    TestRandom(rounds, true);
+    const auto tests = [rounds]
+    {
+        TestStraight();
+        TestSeeksIntoKept();
+        TestKeepLimit();
+        TestSeekBack(0);
+        TestSeekBack(10000);
+        TestSeekPastKept();
+        TestError();
+        TestAbort();
+        TestStopWhileBusy();
+        TestPreRoll();
+        TestRandom(rounds, false);
+        TestRandom(rounds, true);
+    };
 
-    return xsflib::testing::Summary("render ahead");
+    return xsflib::testing::RunTest("render ahead", tests);
 }

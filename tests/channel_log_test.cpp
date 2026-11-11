@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <ios>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -107,20 +108,22 @@ void TestWav(const fs::path& dir)
         "\x04\0\x10\0data\x08\0\0\0\x01\0\xfe\xff\xff\x7f\0\x80",
         52);
 
-    WriteWav(path, {1, -2, 0x7FFF, -0x8000});
+    const bool written = !WriteWav(path, {1, -2, 0x7FFF, -0x8000});
     const std::string wav = ReadText(path);
 
-    Check(wav == kExpected, "a WAV file of two stereo frames");
+    Check(written && wav == kExpected, "a WAV file of two stereo frames");
 }
 
 } // namespace
 
 int main()
 {
-    const TempFolder temp("xsflib_channel_log_test");
+    const auto tests = []
+    {
+        const TempFolder temp("xsflib_channel_log_test");
+        TestLogs(temp.Path());
+        TestWav(temp.Path());
+    };
 
-    TestLogs(temp.Path());
-    TestWav(temp.Path());
-
-    return xsflib::testing::Summary("channel log");
+    return xsflib::testing::RunTest("channel log", tests);
 }

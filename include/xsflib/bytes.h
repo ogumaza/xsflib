@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-// Big- and little-endian loads and stores on byte buffers. They give the same values on any host.
+// Big- and little-endian loads and stores on byte buffers. They give the same values on any host. The appends add
+// little-endian values to the end of a byte vector.
 
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 namespace xsflib
 {
@@ -79,6 +81,18 @@ inline void StoreLe64(uint8_t* p, uint64_t value)
 {
     StoreLe32(p, static_cast<uint32_t>(value));
     StoreLe32(p + 4, static_cast<uint32_t>(value >> 32));
+}
+
+inline void AppendLe16(std::vector<uint8_t>& out, uint16_t value)
+{
+    out.push_back(static_cast<uint8_t>(value));
+    out.push_back(static_cast<uint8_t>(value >> 8));
+}
+
+inline void AppendLe32(std::vector<uint8_t>& out, uint32_t value)
+{
+    AppendLe16(out, static_cast<uint16_t>(value));
+    AppendLe16(out, static_cast<uint16_t>(value >> 16));
 }
 
 constexpr uint16_t ByteSwap16(uint16_t value)

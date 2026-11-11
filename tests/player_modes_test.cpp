@@ -25,7 +25,7 @@ struct TestPart
 };
 
 // An archive mode's source whose Save returns its snapshot in a std::shared_ptr.
-struct ArchiveSource
+struct FakeArchiveSource
 {
     std::shared_ptr<TestPart> Save(const TestPart* previous) const
     {
@@ -41,7 +41,7 @@ struct ArchiveSource
 };
 
 // A game mode's source whose Save returns its snapshot by value.
-struct GameSource
+struct FakeGameSource
 {
     TestPart Save(const TestPart* previous) const
     {
@@ -60,10 +60,10 @@ struct SourceSnapshot : xsflib::player::ModeSnapshot<TestPart, TestPart>
 {
 };
 
-void CheckNeither()
+void TestNeither()
 {
-    ArchiveSource* archive = nullptr;
-    GameSource* game = nullptr;
+    FakeArchiveSource* archive = nullptr;
+    FakeGameSource* game = nullptr;
     const SourceSnapshot* none = nullptr;
     SourceSnapshot both;
     both.archive = std::make_shared<TestPart>();
@@ -74,10 +74,10 @@ void CheckNeither()
     Check(!CanRestoreModes(archive, game, &both), "no snapshot fits when neither mode plays");
 }
 
-void CheckArchive()
+void TestArchive()
 {
-    ArchiveSource archive{3};
-    GameSource* game = nullptr;
+    FakeArchiveSource archive{3};
+    FakeGameSource* game = nullptr;
 
     const std::shared_ptr<const SourceSnapshot> first =
         SaveModes(&archive, game, static_cast<SourceSnapshot*>(nullptr));
@@ -104,10 +104,10 @@ void CheckArchive()
     Check(archive.value == 3, "archive mode restores the archive");
 }
 
-void CheckGame()
+void TestGame()
 {
-    ArchiveSource* archive = nullptr;
-    GameSource game{7};
+    FakeArchiveSource* archive = nullptr;
+    FakeGameSource game{7};
 
     const std::shared_ptr<const SourceSnapshot> first =
         SaveModes(archive, &game, static_cast<SourceSnapshot*>(nullptr));
@@ -138,9 +138,12 @@ void CheckGame()
 
 int main()
 {
-    CheckNeither();
-    CheckArchive();
-    CheckGame();
+    const auto tests = []
+    {
+        TestNeither();
+        TestArchive();
+        TestGame();
+    };
 
-    return xsflib::testing::Summary("player modes");
+    return xsflib::testing::RunTest("player modes", tests);
 }

@@ -13,165 +13,44 @@
 #include <string>
 #include <vector>
 
+#include "ramp_players.h"
 #include "xsflib/player/render_ahead.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/sets.h"
 
 using namespace xsflib::player;
+using ramp_players::RampPlayer;
+using ramp_players::RampSample;
+using ramp_players::SetRatePlayer;
+using ramp_players::SnapshotRampPlayer;
 using xsflib::testing::Check;
 
 namespace
 {
 
-// The sample that a ramp player renders at `frame`.
-int16_t RampSample(uint64_t frame)
-{
-    return static_cast<int16_t>(frame % 20000);
-}
-
-// A player without snapshots. It renders RampSample, and reports that it finished at `finish_at_`.
-class RampPlayer
-{
-public:
-    enum class State
-    {
-        kIdle,
-        kPlaying,
-        kFinished,
-        kError,
-    };
-
-    static constexpr int kSampleRate = 1000;
-
-    bool Load(int length_ms)
-    {
-        length_ms_ = length_ms;
-
-        return true;
-    }
-
-    bool Start()
-    {
-        starts_++;
-        position_ = 0;
-        state_ = State::kPlaying;
-
-        return true;
-    }
-
-    std::size_t Render(int16_t* out, std::size_t frames)
-    {
-        for (std::size_t i = 0; i < frames; i++)
-        {
-            out[2 * i] = out[2 * i + 1] = RampSample(position_ + i);
-        }
-
-        position_ += frames;
-        if (position_ >= finish_at_ && state_ == State::kPlaying)
-        {
-            state_ = State::kFinished;
-        }
-
-        return frames;
-    }
-
-    long long LengthMs() const
-    {
-        return length_ms_;
-    }
-
-    long long FadeMs() const
-    {
-        return length_ms_ >= 0 ? 500 : -1;
-    }
-
-    double Volume() const
-    {
-        return 1.0;
-    }
-
-    State GetState() const
-    {
-        return state_;
-    }
-
-    uint64_t FinishedFrame() const
-    {
-        return finish_at_;
-    }
-
-    const std::string& Error() const
-    {
-        return error_;
-    }
-
-    int starts_ = 0;
-    uint64_t finish_at_ = 300;
-
-protected:
-    uint64_t position_ = 0;
-
-private:
-    long long length_ms_ = 1000;
-    State state_ = State::kIdle;
-    std::string error_;
-};
-
-// A ramp player that takes snapshots: each holds the frame it was taken at.
-class SnapshotRampPlayer : public RampPlayer
-{
-public:
-    struct Snapshot
-    {
-        uint64_t position = 0;
-    };
-
-    std::shared_ptr<const Snapshot> Save(const Snapshot*)
-    {
-        return std::make_shared<const Snapshot>(Snapshot{position_});
-    }
-
-    bool Restore(const Snapshot& snapshot)
-    {
-        restores_++;
-        position_ = snapshot.position;
-
-        return true;
-    }
-
-    int restores_ = 0;
-};
-
-// A ramp player whose rate depends on the set: an estimate of 1,000 Hz until it starts, and 2,000 Hz after that.
-template <typename Base>
-class SetRatePlayer : public Base
-{
-public:
-    static constexpr int kSampleRate = 0;
-
-    int SampleRate() const
-    {
-        return Base::GetState() == Base::State::kIdle ? 1000 : 2000;
-    }
-};
-
 static_assert(!HasSnapshots<RampPlayer>);
 static_assert(HasSnapshots<SnapshotRampPlayer>);
+
+// The left samples of the frames that `read` gives, 64 at a time, until it gives none. `read` is a call that renders,
+// such as Playback::Render.
+template <typename Read>
+std::vector<int16_t> LeftSamples(Read read)
+{
+    const std::vector<int16_t> pcm = xsflib::testing::RenderFrames(read, SIZE_MAX, 64);
+    std::vector<int16_t> left;
+    for (std::size_t i = 0; i < pcm.size(); i += 2)
+    {
+        left.push_back(pcm[i]);
+    }
+
+    return left;
+}
 
 // Renders the rest of `playback` and returns its frames' left samples.
 template <typename Player>
 std::vector<int16_t> RenderAll(Playback<Player>& playback)
 {
-    std::vector<int16_t> left;
-    int16_t pcm[2 * 64];
-    while (const std::size_t n = playback.Render(pcm, 64))
-    {
-        for (std::size_t i = 0; i < n; i++)
-        {
-            left.push_back(pcm[2 * i]);
-        }
-    }
-
-    return left;
+    return LeftSamples([&playback](int16_t* out, std::size_t frames) { return playback.Render(out, frames); });
 }
 
 void TestLengthAndFade()
@@ -183,7 +62,7 @@ void TestLengthAndFade()
     const std::vector<int16_t> left = RenderAll(playback);
 
     Check(playback.HasLengthTag() && playback.LengthFrames() == 1500, "1 s and a 0.5 s fade at 1,000 Hz");
-    Check(left.size() == 1500, "the track's frames");
+    XSFLIB_REQUIRE(left.size() == 1500);
     Check(left[999] == RampSample(999), "no fade before the fade");
     Check(left[1250] == RampSample(1250) / 2, "half way through the fade");
 }
@@ -198,6 +77,24 @@ void TestUntaggedEnd()
 
     // The sound reports its end at frame 300 (FinishedFrame). Playback ends half a second later.
     Check(!playback.HasLengthTag() && left.size() == 800, "an untagged sound ends 0.5 s after it finishes");
+}
+
+// The length for a file's tags, with the default options. Without a length tag, a file plays for 150 s, and fades for
+// 10 s unless it has a fade tag. A file with a length tag and no fade tag has no fade.
+void TestTagLength()
+{
+    const PlaybackOptions<RampPlayer> kOptions;
+    const auto length_is = [&kOptions](const xsflib::psf::Tags& tags, long long play_ms, long long fade_ms)
+    {
+        const TrackLength length = TagLength(tags, kOptions);
+
+        return length.play_ms == play_ms && length.fade_ms == fade_ms;
+    };
+
+    XSFLIB_CHECK(length_is({{"length", "1:00"}, {"fade", "5"}}, 60000, 5000));
+    XSFLIB_CHECK(length_is({{"length", "1:00"}}, 60000, 0));
+    XSFLIB_CHECK(length_is({}, 150000, 10000));
+    XSFLIB_CHECK(length_is({{"fade", "5"}}, 150000, 5000));
 }
 
 void TestSeekWithoutSnapshots()
@@ -243,26 +140,57 @@ void TestSeekWithSnapshots()
     XSFLIB_CHECK(pcm[0] == RampSample(250));
 }
 
-// Reads all of a rendered-ahead playback and checks every sample against the ramp and the fade.
-template <typename Player>
-void TestRenderAhead(const std::string& what)
+// A seek back moves the ends of the render blocks to other frames. A snapshot at the end of a block can then come
+// earlier in a stretch than the snapshot already there. The earlier snapshot replaces the later one. Each stretch keeps
+// one snapshot: the earliest.
+void TestSnapshotsAfterSeekBack()
 {
+    PlaybackOptions<SnapshotRampPlayer> options;
+    options.snapshot_interval = 100;
+    Playback<SnapshotRampPlayer> playback;
+    playback.Open(1000, options);
+    playback.Start();
+    int16_t pcm[2 * 64];
+    for (int i = 0; i < 15; i++)
+    {
+        playback.Render(pcm, 64);
+    }
+
+    // Snapshots at 0, 128, 256, 320, 448, 512, 640, 704, 832 and 960.
+    const std::size_t first_pass = playback.SnapshotCount();
+    Check(first_pass == 10, "one snapshot in each stretch of 100 frames");
+
+    // Back to 50, then on in blocks of 60: the blocks end at 110, 170, 230 and so on.
+    XSFLIB_CHECK(playback.Seek(50));
+    for (int i = 0; i < 15; i++)
+    {
+        playback.Render(pcm, 60);
+    }
+
+    Check(playback.SnapshotCount() == first_pass, "still one snapshot in each stretch after the seek back");
+    Check(playback.SeekStart(120) == 110 && playback.SeekStart(240) == 230 && playback.SeekStart(330) == 320,
+          "each stretch keeps its earliest snapshot");
+}
+
+// Reads all of a rendered-ahead playback of 1 s and a 0.5 s fade. It has to give `frames` frames, those of a straight
+// render.
+template <typename Player>
+void TestRenderAhead(const std::string& what, std::size_t frames)
+{
+    Playback<Player> straight;
+    straight.Open(1000, {});
+    straight.Start();
+    const std::vector<int16_t> expected = RenderAll(straight);
+
     auto playback = std::make_unique<Playback<Player>>();
     playback->Open(1000, {});
     playback->Start();
     RenderAhead ahead(std::move(playback));
 
-    std::vector<int16_t> left;
-    int16_t pcm[2 * 64];
-    while (const std::size_t n = ahead.Read(pcm, 64))
-    {
-        for (std::size_t i = 0; i < n; i++)
-        {
-            left.push_back(pcm[2 * i]);
-        }
-    }
+    const std::vector<int16_t> left =
+        LeftSamples([&ahead](int16_t* out, std::size_t count) { return ahead.Read(out, count); });
 
-    Check(left.size() == 1500 && left[500] == RampSample(500), what + ": every frame");
+    Check(expected.size() == frames && left == expected, what + ": every frame matches a straight render");
     Check(ahead.Error().empty(), what + ": no error");
 }
 
@@ -280,7 +208,7 @@ void TestSetRateLength()
     Check(estimated_rate == 1000 && estimate == 1500, "before the start, the length follows the estimate");
     Check(playback.SampleRate() == 2000 && playback.PlayFrames() == 2000 && playback.FadeFrames() == 1000,
           "after the start, the length follows the set's rate");
-    Check(left.size() == 3000, "the track's frames at the set's rate");
+    XSFLIB_REQUIRE(left.size() == 3000);
     Check(left[1999] == RampSample(1999), "no fade before the fade");
     Check(left[2500] == RampSample(2500) / 2, "half way through the fade");
 }
@@ -324,42 +252,27 @@ void TestSetRateSnapshots()
     Check(chosen.SnapshotCount() == 10, "the options' interval between snapshots");
 }
 
-// Rendering ahead takes its limit and block size from the playback's rate.
-void TestSetRateRenderAhead()
-{
-    auto playback = std::make_unique<Playback<SetRatePlayer<RampPlayer>>>();
-    playback->Open(1000, {});
-    playback->Start();
-    RenderAhead ahead(std::move(playback));
-
-    std::vector<int16_t> left;
-    int16_t pcm[2 * 64];
-    while (const std::size_t n = ahead.Read(pcm, 64))
-    {
-        for (std::size_t i = 0; i < n; i++)
-        {
-            left.push_back(pcm[2 * i]);
-        }
-    }
-
-    Check(left.size() == 3000 && left[1000] == RampSample(1000), "every frame, rendered ahead at the set's rate");
-    Check(ahead.Error().empty(), "no error at the set's rate");
-}
-
 } // namespace
 
 int main()
 {
-    TestLengthAndFade();
-    TestUntaggedEnd();
-    TestSeekWithoutSnapshots();
-    TestSeekWithSnapshots();
-    TestRenderAhead<RampPlayer>("without snapshots");
-    TestRenderAhead<SnapshotRampPlayer>("with snapshots");
-    TestSetRateLength();
-    TestSetRateUntaggedEnd();
-    TestSetRateSnapshots();
-    TestSetRateRenderAhead();
+    const auto tests = []
+    {
+        TestLengthAndFade();
+        TestUntaggedEnd();
+        TestTagLength();
+        TestSeekWithoutSnapshots();
+        TestSeekWithSnapshots();
+        TestSnapshotsAfterSeekBack();
+        TestRenderAhead<RampPlayer>("without snapshots", 1500);
+        TestRenderAhead<SnapshotRampPlayer>("with snapshots", 1500);
+        TestSetRateLength();
+        TestSetRateUntaggedEnd();
+        TestSetRateSnapshots();
 
-    return xsflib::testing::Summary("playback");
+        // Rendering ahead takes its limit and block size from the playback's rate.
+        TestRenderAhead<SetRatePlayer<RampPlayer>>("at the set's rate", 3000);
+    };
+
+    return xsflib::testing::RunTest("playback", tests);
 }

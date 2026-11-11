@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 // UTF-8 in the names and tags that files hold: the decoding and encoding of one character, the check of a whole text,
-// and a name's printable form.
+// and a name's printable form. AppendUtf16 converts UTF-16 text to UTF-8.
 
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -50,6 +51,20 @@ inline void AppendUtf8(std::string& out, uint32_t c)
         out += static_cast<char>(0x80 | (c & 0x3f));
     }
 }
+
+// How AppendUtf16 reads UTF-16 text, and what it changes.
+struct Utf16Rules
+{
+    bool big_endian = false;           // the byte order of each 16-bit unit
+    bool stop_at_nul = false;          // the text ends at a unit of 0
+    bool lone_surrogate_bytes = false; // a lone surrogate becomes its three bytes in place of U+FFFD
+    bool controls_as_spaces = false;   // a code point below U+0020 becomes a space
+    bool trim_spaces = false;          // the spaces at either end of the converted text are dropped
+};
+
+// Appends the UTF-16 text `text` to `out` in UTF-8, as `rules` say. A high surrogate followed by a low one becomes one
+// code point. A surrogate without its partner becomes U+FFFD. An odd byte at the end is ignored.
+void AppendUtf16(std::string& out, std::span<const uint8_t> text, const Utf16Rules& rules = {});
 
 // Whether `text` is valid UTF-8 throughout.
 bool IsUtf8(std::string_view text);

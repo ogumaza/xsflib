@@ -51,6 +51,10 @@ bool IsRomSet(const std::filesystem::path& path);
 std::optional<std::string> ReadRomSet(const std::filesystem::path& path, const std::set<uint64_t>& sizes,
                                       std::string_view program, std::vector<SetFile>& files);
 
+// Reads the files of the set at `path` as above, with the sizes of the chips of `games`.
+std::optional<std::string> ReadRomSet(const std::filesystem::path& path, std::span<const RomSetGame> games,
+                                      std::string_view program, std::vector<SetFile>& files);
+
 struct RomSetImage
 {
     std::optional<std::size_t> game; // The index of the game whose chips are all in the set.

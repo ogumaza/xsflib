@@ -19,7 +19,7 @@ inputs:
     required: false
     default: "false"
   foobar2000-version:
-    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's pin
     required: false
     default: ""
   foobar2000-sha256:
@@ -31,7 +31,7 @@ inputs:
     required: false
     default: "false"
   xmplay-sha256:
-    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's pin
     required: false
     default: ""
   test-timeout:
@@ -54,19 +54,13 @@ runs:
   using: composite
   steps:
     - name: Download the foobar2000 SDK
-      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version == ''
-      uses: ./externals/xsflib/ci/foobar2000-sdk
-    - name: Download the project's foobar2000 SDK
-      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version != ''
+      if: inputs.foobar2000 == 'true'
       uses: ./externals/xsflib/ci/foobar2000-sdk
       with:
         version: ${{ inputs.foobar2000-version }}
         sha256: ${{ inputs.foobar2000-sha256 }}
     - name: Download the XMPlay plugin SDK
-      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 == ''
-      uses: ./externals/xsflib/ci/xmplay-sdk
-    - name: Download the project's XMPlay plugin SDK
-      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 != ''
+      if: inputs.xmplay == 'true'
       uses: ./externals/xsflib/ci/xmplay-sdk
       with:
         sha256: ${{ inputs.xmplay-sha256 }}

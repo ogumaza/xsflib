@@ -21,6 +21,12 @@ std::vector<std::string> Arguments(int argc, char** argv);
 // (xsflib_add_droplet) reads such a pipe. Windows' C runtime has no line buffering. There, stdout stays as it is.
 void LineBufferOutput();
 
+#ifdef _WIN32
+// Makes stdout unbuffered when it goes to a file or a pipe. Windows' C runtime has no line buffering. Buffered output
+// would reach the file in blocks, out of order with the errors on stderr. Only Windows has this function.
+void UnbufferRedirectedOutput();
+#endif
+
 // Sets the console's output code page to UTF-8. With `restore`, the old code page comes back when the program ends.
 // That includes an end by Ctrl+C or by the window's close button.
 void UseUtf8Output(bool restore);
@@ -28,6 +34,9 @@ void UseUtf8Output(bool restore);
 // When the program has a console window of its own, writes `prompt` to `stream` and waits for Enter. Explorer gives a
 // program a window of its own when files are dropped on it, or when it's double-clicked. That window closes when the
 // program ends, before its messages can be read.
+//
+// The program waits only while stdin and stdout are the console. Another program that runs it with either one
+// redirected gets no prompt and no wait.
 void WaitInOwnWindow(std::FILE* stream, const char* prompt);
 
 } // namespace xsflib::console

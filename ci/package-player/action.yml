@@ -26,10 +26,6 @@ inputs:
     description: The XMPlay plugin's name, such as xmp-xyz, or empty for a player without one (in the win32 artifact)
     required: false
     default: ""
-  xsflib-license:
-    description: "'true' to add xsflib's LICENSE to each download, as LICENSE-xsflib.txt"
-    required: false
-    default: "false"
 runs:
   using: composite
   steps:
@@ -44,7 +40,6 @@ runs:
         PROGRAMS: ${{ inputs.programs }}
         COMPONENT: ${{ inputs.component }}
         XMPLAY_PLUGIN: ${{ inputs.xmplay-plugin }}
-        XSFLIB_LICENSE: ${{ inputs.xsflib-license }}
       run: |
         mkdir -p dist
         for package in win-x64 win32; do
@@ -53,25 +48,16 @@ runs:
             cp "artifacts/$package/$program.exe" "stage/$package/"
           done
           cp README.md LICENSE THIRD-PARTY-NOTICES.md "stage/$package/"
-          if [ "$XSFLIB_LICENSE" = true ]; then
-            cp externals/xsflib/LICENSE "stage/$package/LICENSE-xsflib.txt"
-          fi
           (cd "stage/$package" && zip -q -X "../../dist/$FORMAT-$VERSION-$package.zip" *)
         done
         mkdir -p stage/component/x64
         cp "artifacts/win32/$COMPONENT.dll" stage/component/
         cp "artifacts/win-x64/$COMPONENT.dll" stage/component/x64/
         cp LICENSE THIRD-PARTY-NOTICES.md stage/component/
-        if [ "$XSFLIB_LICENSE" = true ]; then
-          cp externals/xsflib/LICENSE stage/component/LICENSE-xsflib.txt
-        fi
         (cd stage/component && zip -q -X -r "../../dist/$COMPONENT-$VERSION.fb2k-component" .)
         if [ -n "$XMPLAY_PLUGIN" ]; then
           mkdir -p stage/xmplay
           cp "artifacts/win32/$XMPLAY_PLUGIN.dll" LICENSE THIRD-PARTY-NOTICES.md stage/xmplay/
-          if [ "$XSFLIB_LICENSE" = true ]; then
-            cp externals/xsflib/LICENSE stage/xmplay/LICENSE-xsflib.txt
-          fi
           (cd stage/xmplay && zip -q -X "../../dist/$XMPLAY_PLUGIN-$VERSION.zip" *)
         fi
         for file in dist/*; do

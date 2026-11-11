@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 // The program of a format that holds each of a set's files once (see streaming.h). The file also holds the parts that
-// the streaming program shares with the rest of xsflib::psf: the chunk reader of both kinds of program (chunks.h), the
-// inflater of the container's decompressor (inflate.h), the writer of a PSF file in pieces, and the fields of the
-// descriptors and of the FILE chunks.
+// the streaming program shares with the rest of xsflib::psf: the chunk reader and the chunk writers of both kinds of
+// program (chunks.h), the inflater of the container's decompressor (inflate.h), the writer of a PSF file in pieces, and
+// the fields of the descriptors and of the FILE chunks.
 
 #include "xsflib/psf/streaming.h"
 
@@ -35,18 +35,17 @@ namespace
 // The chunks of a streaming program besides its FILE chunks: a SND chunk, and no MEM chunks.
 constexpr detail::ChunkKinds kStreamingChunks{.memory = false, .sound = true};
 
-// A FILE chunk's header and its path, padded to four bytes. The file's data follows them.
-std::vector<uint8_t> FileChunkHead(const std::string& path, std::size_t data_size)
-{
-    std::vector<uint8_t> path_area;
-    PutPath(path_area, path);
-    PadTo4(path_area);
-    std::vector<uint8_t> head = {'F', 'I', 'L', 'E'};
-    Put32(head, static_cast<uint32_t>(path_area.size() + data_size));
-    head.insert(head.end(), path_area.begin(), path_area.end());
+// The most bytes in one call to zlib. zlib counts in 32-bit units.
+constexpr std::size_t kZlibMaxPart = std::size_t{1} << 30;
 
-    return head;
-}
+// An allowance for the output that zlib can hold before it gives it out.
+constexpr uint64_t kZlibHeldOutput = 0x10000;
+
+// The size of the buffer for the bytes that a read drops.
+constexpr std::size_t kScratchSize = 0x10000;
+
+// The size of the buffer that InflateWhole inflates into.
+constexpr std::size_t kInflateBufferSize = std::size_t{1} << 20;
 
 // A program's bytes in order, read a piece at a time.
 class ProgramSource
@@ -122,8 +121,7 @@ public:
 
         while (!error_ && got < n && !ended_)
         {
-            // zlib counts in 32-bit units.
-            const std::size_t want = std::min<std::size_t>(n - got, std::size_t{1} << 30);
+            const std::size_t want = std::min(n - got, kZlibMaxPart);
             zs_.next_out = dest + got;
             zs_.avail_out = static_cast<uInt>(want);
             const int ret = inflate(&zs_, Z_NO_FLUSH);
@@ -154,7 +152,7 @@ public:
     // Reads the rest of the stream, and returns its error if it has one.
     std::optional<std::string> Drain()
     {
-        std::vector<uint8_t> scratch(0x10000);
+        std::vector<uint8_t> scratch(kScratchSize);
         std::size_t got = scratch.size();
         while (got == scratch.size())
         {
@@ -171,7 +169,7 @@ public:
     {
         // Deflate makes at most about 1,032 bytes of each compressed byte. zlib can also hold some output that it
         // hasn't given out yet.
-        const uint64_t most = (uint64_t{zs_.avail_in} + 1) * 1032 + 0x10000;
+        const uint64_t most = (uint64_t{zs_.avail_in} + 1) * 1032 + kZlibHeldOutput;
         return ended_ ? 0 : std::min<uint64_t>(most, kMaxProgramSize - produced_);
     }
 
@@ -206,7 +204,7 @@ public:
     // Reads and drops `n` bytes of a chunk.
     std::optional<std::string> Skip(uint64_t n)
     {
-        scratch_.resize(static_cast<std::size_t>(std::min<uint64_t>(n, 0x10000)));
+        scratch_.resize(static_cast<std::size_t>(std::min<uint64_t>(n, kScratchSize)));
         while (n > 0)
         {
             const auto part = static_cast<std::size_t>(std::min<uint64_t>(n, scratch_.size()));
@@ -289,10 +287,12 @@ std::optional<std::string> ReadFileChunk(ChunkReader& reader, uint32_t size, Pro
     {
         return err;
     }
+
     if (auto err = reader.Skip(data_start - 2 - len))
     {
         return err;
     }
+
     if (auto err = reader.ReadAll(file.data.data(), file.data.size()))
     {
         return err;
@@ -317,6 +317,7 @@ std::optional<std::string> ReadSoundChunk(ChunkReader& reader, uint32_t size, Pr
     {
         return err;
     }
+
     if (auto err = reader.Skip(size % 4))
     {
         return err;
@@ -394,6 +395,7 @@ std::optional<std::string> SplitChunks(ProgramSource& source, ProgramChunks& out
         {
             return err;
         }
+
         if (got < pad)
         {
             return std::nullopt;
@@ -410,10 +412,58 @@ std::optional<std::string> detail::ParseChunks(const std::vector<uint8_t>& progr
     return SplitChunks(source, out, kinds);
 }
 
+std::vector<uint8_t> detail::FileChunkHead(const std::string& path, std::size_t data_size)
+{
+    std::vector<uint8_t> path_area;
+    PutPath(path_area, path);
+    PadTo4(path_area);
+    std::vector<uint8_t> head = {'F', 'I', 'L', 'E'};
+    Put32(head, static_cast<uint32_t>(path_area.size() + data_size));
+    head.insert(head.end(), path_area.begin(), path_area.end());
+
+    return head;
+}
+
+std::vector<uint8_t> detail::FileChunkBytes(const std::string& path, std::span<const uint8_t> data)
+{
+    std::vector<uint8_t> chunk = FileChunkHead(path, data.size());
+    chunk.insert(chunk.end(), data.begin(), data.end());
+    PadTo4(chunk);
+
+    return chunk;
+}
+
+std::vector<uint8_t> detail::SoundChunkBytes(std::span<const uint32_t> sound_ids)
+{
+    if (sound_ids.empty())
+    {
+        throw std::invalid_argument("a SND chunk selects at least one sound");
+    }
+
+    std::vector<uint8_t> chunk = {'S', 'N', 'D', ' '};
+    Put32(chunk, static_cast<uint32_t>(sound_ids.size() * 4));
+    for (const uint32_t sound_id : sound_ids)
+    {
+        Put32(chunk, sound_id);
+    }
+
+    return chunk;
+}
+
+std::optional<std::string> detail::CheckProgramCrc(const uint8_t* compressed, std::size_t size, uint32_t crc)
+{
+    if (crc32(0, compressed, static_cast<uInt>(size)) != crc)
+    {
+        return "program CRC mismatch";
+    }
+
+    return std::nullopt;
+}
+
 std::optional<std::string> detail::InflateWhole(const uint8_t* compressed, uint32_t size, std::vector<uint8_t>& program)
 {
     InflateSource source(compressed, size);
-    std::vector<uint8_t> buffer(1 << 20);
+    std::vector<uint8_t> buffer(kInflateBufferSize);
     std::size_t got = buffer.size();
     while (got == buffer.size())
     {
@@ -430,8 +480,7 @@ std::optional<std::string> detail::InflateWhole(const uint8_t* compressed, uint3
 
 void Put16(std::vector<uint8_t>& v, uint32_t x)
 {
-    v.push_back(static_cast<uint8_t>(x));
-    v.push_back(static_cast<uint8_t>(x >> 8));
+    AppendLe16(v, static_cast<uint16_t>(x));
 }
 
 // A path in a descriptor or a FILE chunk: its u16 length, then its bytes.
@@ -495,6 +544,7 @@ std::vector<uint8_t> WritePsfPieces(uint8_t version, const std::vector<uint8_t>&
     Put32(out, 0); // the compressed program's size and CRC, filled in below
     Put32(out, 0);
     out.insert(out.end(), reserved.begin(), reserved.end());
+
     const std::size_t start = out.size();
     if (program_size > 0)
     {
@@ -509,13 +559,13 @@ std::vector<uint8_t> WritePsfPieces(uint8_t version, const std::vector<uint8_t>&
         out.resize(start + bound);
         zs.next_out = out.data() + start;
         zs.avail_out = static_cast<uInt>(bound);
+
         bool ok = true;
         for (const std::span<const uint8_t> piece : pieces)
         {
-            // zlib counts in 32-bit units.
             for (std::size_t done = 0; ok && done < piece.size();)
             {
-                const std::size_t part = std::min<std::size_t>(piece.size() - done, std::size_t{1} << 30);
+                const std::size_t part = std::min(piece.size() - done, kZlibMaxPart);
                 zs.next_in = const_cast<uint8_t*>(piece.data() + done);
                 zs.avail_in = static_cast<uInt>(part);
                 ok = deflate(&zs, Z_NO_FLUSH) == Z_OK && zs.avail_in == 0;
@@ -551,15 +601,12 @@ void StreamingProgramBuilder::Hold(std::vector<uint8_t> bytes)
 
 void StreamingProgramBuilder::AddFile(const std::string& path, const std::vector<uint8_t>& data)
 {
-    std::vector<uint8_t> chunk = FileChunkHead(path, data.size());
-    chunk.insert(chunk.end(), data.begin(), data.end());
-    PadTo4(chunk);
-    Hold(std::move(chunk));
+    Hold(detail::FileChunkBytes(path, data));
 }
 
 void StreamingProgramBuilder::AddFileRef(const std::string& path, std::span<const uint8_t> data)
 {
-    Hold(FileChunkHead(path, data.size()));
+    Hold(detail::FileChunkHead(path, data.size()));
     pieces_.push_back({{}, data});
     Hold(std::vector<uint8_t>((4 - data.size() % 4) % 4, 0));
 }
@@ -572,19 +619,7 @@ void StreamingProgramBuilder::AddSound(uint32_t sound_id)
 
 void StreamingProgramBuilder::AddSounds(std::span<const uint32_t> sound_ids)
 {
-    if (sound_ids.empty())
-    {
-        throw std::invalid_argument("a SND chunk selects at least one sound");
-    }
-
-    std::vector<uint8_t> chunk = {'S', 'N', 'D', ' '};
-    Put32(chunk, static_cast<uint32_t>(sound_ids.size() * 4));
-    for (const uint32_t sound_id : sound_ids)
-    {
-        Put32(chunk, sound_id);
-    }
-
-    Hold(std::move(chunk));
+    Hold(detail::SoundChunkBytes(sound_ids));
 }
 
 std::vector<std::span<const uint8_t>> StreamingProgramBuilder::Pieces() const
@@ -622,28 +657,22 @@ std::optional<std::string> ParseStreamingProgram(const std::vector<uint8_t>& pro
 
 std::optional<std::string> ParsePsfChunks(const std::vector<uint8_t>& data, ProgramChunks& out)
 {
-    const std::optional<detail::PsfHeader> header = detail::ReadPsfHeader(data);
-    if (!header)
+    std::optional<detail::PsfHeader> header;
+    if (std::optional<std::string> error = detail::CheckPsfHeader(data, ParseOptions{}, header))
     {
-        return "not a PSF file";
+        return error;
     }
 
-    const uint32_t reserved_size = header->reserved_size;
     const uint32_t program_size = header->program_size;
-    const uint32_t crc = header->crc;
-    if (!header->complete)
-    {
-        return "truncated PSF file";
-    }
     if (program_size == 0)
     {
         return std::nullopt;
     }
 
-    const uint8_t* compressed = data.data() + 16 + reserved_size;
-    if (crc32(0, compressed, program_size) != crc)
+    const uint8_t* compressed = data.data() + detail::kHeaderSize + header->reserved_size;
+    if (std::optional<std::string> error = detail::CheckProgramCrc(compressed, program_size, header->crc))
     {
-        return "program CRC mismatch";
+        return error;
     }
 
     // An error in the zlib stream comes first. The same happens when the program is inflated whole before it's split.

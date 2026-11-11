@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 
 // Checks the console helpers (xsflib/console.h): the arguments come back one for one. On Windows they're read from the
-// wide command line. Elsewhere they're argv itself. The other helpers do nothing unless the tool has a console window
-// to itself.
+// wide command line. Elsewhere they're argv itself. LineBufferOutput line-buffers stdout outside Windows. On Windows,
+// UseUtf8Output sets the console's code page to UTF-8. WaitInOwnWindow waits only in a console window that the tool
+// doesn't share.
 
 #include "xsflib/console.h"
 
@@ -14,17 +15,20 @@
 
 int main(int argc, char** argv)
 {
-    const std::vector<std::string> args = xsflib::console::Arguments(argc, argv);
+    const auto tests = [argc, argv]
+    {
+        const std::vector<std::string> args = xsflib::console::Arguments(argc, argv);
 
-    XSFLIB_CHECK(static_cast<int>(args.size()) == argc);
+        XSFLIB_CHECK(static_cast<int>(args.size()) == argc);
 #ifndef _WIN32
-    XSFLIB_CHECK(args == std::vector<std::string>(argv, argv + argc));
+        XSFLIB_CHECK(args == std::vector<std::string>(argv, argv + argc));
 #endif
 
-    // ctest runs the test in a console that it shares, or in none. The tool then neither waits nor prints.
-    xsflib::console::LineBufferOutput();
-    xsflib::console::UseUtf8Output(true);
-    xsflib::console::WaitInOwnWindow(stderr, "\nPress Enter to close this window.");
+        // ctest runs the test in a console that it shares, or in none. The tool then neither waits nor prints.
+        xsflib::console::LineBufferOutput();
+        xsflib::console::UseUtf8Output(true);
+        xsflib::console::WaitInOwnWindow(stderr, "\nPress Enter to close this window.");
+    };
 
-    return xsflib::testing::Summary("console");
+    return xsflib::testing::RunTest("console", tests);
 }

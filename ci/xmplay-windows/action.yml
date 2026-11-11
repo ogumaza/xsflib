@@ -11,17 +11,13 @@ inputs:
     description: The plugin's target, such as xmp-xyz
     required: true
   xmplay-sha256:
-    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's pin
     required: false
     default: ""
 runs:
   using: composite
   steps:
     - name: Download the XMPlay plugin SDK
-      if: inputs.xmplay-sha256 == ''
-      uses: ./externals/xsflib/ci/xmplay-sdk
-    - name: Download the project's XMPlay plugin SDK
-      if: inputs.xmplay-sha256 != ''
       uses: ./externals/xsflib/ci/xmplay-sdk
       with:
         sha256: ${{ inputs.xmplay-sha256 }}

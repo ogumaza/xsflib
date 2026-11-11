@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include "xsflib/bytes.h"
 
 namespace xsflib
 {
@@ -52,6 +55,59 @@ std::pair<uint32_t, std::size_t> Utf8Character(std::string_view s)
     }
 
     return {c, length};
+}
+
+void AppendUtf16(std::string& out, std::span<const uint8_t> text, const Utf16Rules& rules)
+{
+    const auto unit = [&](std::size_t at) -> uint32_t
+    {
+        return rules.big_endian ? LoadBe16(text.data() + at) : LoadLe16(text.data() + at);
+    };
+
+    const std::size_t start = out.size();
+    for (std::size_t at = 0; at + 2 <= text.size(); at += 2)
+    {
+        uint32_t c = unit(at);
+        if (c == 0 && rules.stop_at_nul)
+        {
+            break;
+        }
+
+        if (c >= 0xd800 && c < 0xdc00 && at + 4 <= text.size())
+        {
+            const uint32_t low = unit(at + 2);
+            if (low >= 0xdc00 && low < 0xe000)
+            {
+                c = 0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00);
+                at += 2;
+            }
+        }
+
+        // AppendUtf8 writes U+FFFD for a surrogate.
+        if (c >= 0xd800 && c < 0xe000 && rules.lone_surrogate_bytes)
+        {
+            out += static_cast<char>(0xe0 | (c >> 12));
+            out += static_cast<char>(0x80 | ((c >> 6) & 0x3f));
+            out += static_cast<char>(0x80 | (c & 0x3f));
+        }
+        else
+        {
+            AppendUtf8(out, c < 0x20 && rules.controls_as_spaces ? ' ' : c);
+        }
+    }
+
+    if (rules.trim_spaces)
+    {
+        const std::size_t first = out.find_first_not_of(' ', start);
+        if (first == std::string::npos)
+        {
+            out.resize(start);
+            return;
+        }
+
+        out.resize(out.find_last_not_of(' ') + 1);
+        out.erase(start, first - start);
+    }
 }
 
 bool IsUtf8(std::string_view text)

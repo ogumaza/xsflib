@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // The checks that the unit tests share. They're seqlib's checks (seqlib/testing/check.h) under xsflib's names. A failed
-// check is reported and counted, and the test goes on. One run then lists every failure. RunTest runs the checks of a
-// test's main and gives its exit status.
+// check is reported and counted, and the test goes on. One run then lists every failure. A failed XSFLIB_REQUIRE also
+// returns from the function that contains it. RunTest runs the checks of a test's main and gives its exit status.
 
 #pragma once
 
@@ -42,3 +42,7 @@ int RunTest(const char* name, Body body)
 
 // seqlib's SEQLIB_CHECK, under xsflib's name.
 #define XSFLIB_CHECK(cond) SEQLIB_CHECK(cond)
+
+// seqlib's SEQLIB_REQUIRE, under xsflib's name. A failed check also returns from the function that contains it. That
+// function has to return void. A test checks a count with it before it reads the counted items by their index.
+#define XSFLIB_REQUIRE(cond) SEQLIB_REQUIRE(cond)

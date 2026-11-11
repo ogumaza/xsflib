@@ -31,6 +31,7 @@
 #include "xsflib/cli/tool.h"
 #include "xsflib/player/playback.h"
 #include "xsflib/psf/psf.h"
+#include "xsflib/rip/tool.h"
 
 namespace xsflib::cli
 {
@@ -96,6 +97,8 @@ std::string DescribeLoadedChunks(player::Playback<Player>& playback)
 namespace detail
 {
 
+constexpr std::size_t kBlockFrames = 4096; // frames that Render renders at a time
+
 // What a play tool's command line sets: the playback's options, the output file (-o) and --info.
 template <typename Player>
 struct PlayOptions
@@ -154,6 +157,28 @@ void PrintInfo(const PlayTool<Player>& tool, player::Playback<Player>& playback)
                  playback.HasLengthTag() ? "" : " (defaults)");
 }
 
+// Renders `playback` from its position to its end, or to an emulation error, in blocks of kBlockFrames. Returns the
+// interleaved stereo samples.
+template <typename Player>
+std::vector<int16_t> RenderToEnd(player::Playback<Player>& playback)
+{
+    std::vector<int16_t> pcm;
+    pcm.reserve(static_cast<std::size_t>(playback.LengthFrames()) * 2);
+    std::vector<int16_t> block(2 * kBlockFrames);
+    while (true)
+    {
+        const std::size_t n = playback.Render(block.data(), kBlockFrames);
+        if (n == 0)
+        {
+            break;
+        }
+
+        pcm.insert(pcm.end(), block.begin(), block.begin() + static_cast<std::ptrdiff_t>(2 * n));
+    }
+
+    return pcm;
+}
+
 // Renders `in` to `out`. With --info, prints what `in` loads instead. Returns the exit code.
 template <typename Player>
 int Render(const PlayTool<Player>& tool, const std::string& in, const std::filesystem::path& out,
@@ -194,20 +219,7 @@ int Render(const PlayTool<Player>& tool, const std::string& in, const std::files
     }
 
     const auto t1 = std::chrono::steady_clock::now();
-
-    std::vector<int16_t> pcm;
-    pcm.reserve(static_cast<std::size_t>(playback.LengthFrames()) * 2);
-    std::vector<int16_t> block(2 * 4096);
-    while (true)
-    {
-        const std::size_t n = playback.Render(block.data(), 4096);
-        if (n == 0)
-        {
-            break;
-        }
-
-        pcm.insert(pcm.end(), block.begin(), block.begin() + static_cast<std::ptrdiff_t>(2 * n));
-    }
+    const std::vector<int16_t> pcm = RenderToEnd(playback);
 
     // After an emulation error, only the blocks before the one in which the error happened are written. The exit code
     // reports that the render failed.
@@ -236,9 +248,61 @@ int Render(const PlayTool<Player>& tool, const std::string& in, const std::files
     const double audio = pcm.size() / 2.0 / playback.SampleRate();
     std::fprintf(stderr, "%s: %.2f s rendered in %.2f s (%.2fx real time) after %.2f s of %s\n",
                  out.filename().string().c_str(), audio, secs, audio / secs, boot, tool.set_up.c_str());
-    std::fprintf(stderr, "output: %s\n", std::filesystem::absolute(out).lexically_normal().string().c_str());
+    rip::ReportOutput(out);
 
     return failed ? 1 : 0;
+}
+
+// Takes one of the play tool's options: -o, --length, --fade, --default or --info. Returns -1 if `a` isn't one of them,
+// 0 when it took `a`, or 2 after printing an error.
+template <typename Player>
+int TakePlayOption(const std::string& a, OptionValue& value, PlayOptions<Player>& o)
+{
+    if (a == "-o" || a == "--output")
+    {
+        o.out = value();
+        return 0;
+    }
+
+    if (a == "--info")
+    {
+        o.info = true;
+        return 0;
+    }
+
+    long long* time = nullptr;
+    if (a == "--length")
+    {
+        time = &o.playback.length_override_ms;
+    }
+    else if (a == "--fade")
+    {
+        time = &o.playback.fade_override_ms;
+    }
+    else if (a == "--default")
+    {
+        time = &o.playback.default_length_ms;
+    }
+    else
+    {
+        return -1;
+    }
+
+    // ParseArguments reports a missing value.
+    const std::string v = value();
+    if (value.Missing())
+    {
+        return 0;
+    }
+
+    *time = psf::ParseTime(v);
+    if (*time < 0)
+    {
+        std::fprintf(stderr, "error: bad time for %s: '%s'\n", a.c_str(), v.c_str());
+        return 2;
+    }
+
+    return 0;
 }
 
 // Reads the options and inputs. Returns 0 to go on, -1 when there's nothing more to do (after --help or --version), or
@@ -247,78 +311,19 @@ template <typename Player>
 int ParseArgs(const PlayTool<Player>& tool, int argc, char** argv, PlayOptions<Player>& o,
               std::vector<std::string>& inputs)
 {
-    for (int i = 1; i < argc; i++)
+    const auto usage = [&tool](std::FILE* out)
     {
-        const std::string a = argv[i];
-        long long* time = nullptr;
-        if (a == "-h" || a == "--help")
-        {
-            PrintUsage(tool, stdout);
-            return -1;
-        }
-        else if (a == "--version")
-        {
-            std::printf("%s %s\n", tool.name.c_str(), tool.version.c_str());
-            return -1;
-        }
-        else if (a == "-o" || a == "--output")
-        {
-            if (i + 1 >= argc)
-            {
-                std::fprintf(stderr, "error: %s %s\n", a.c_str(), tool.requires_a_value.c_str());
-                return 2;
-            }
+        PrintUsage(tool, out);
+    };
 
-            o.out = argv[++i];
-        }
-        else if (a == "--length")
-        {
-            time = &o.playback.length_override_ms;
-        }
-        else if (a == "--fade")
-        {
-            time = &o.playback.fade_override_ms;
-        }
-        else if (a == "--default")
-        {
-            time = &o.playback.default_length_ms;
-        }
-        else if (a == "--info")
-        {
-            o.info = true;
-        }
-        else if (a.size() > 1 && a[0] == '-')
-        {
-            std::fprintf(stderr, "error: unknown option %s (see --help)\n", a.c_str());
-            return 2;
-        }
-        else
-        {
-            inputs.push_back(a);
-        }
-
-        if (time)
-        {
-            if (i + 1 >= argc)
-            {
-                std::fprintf(stderr, "error: %s %s\n", a.c_str(), tool.requires_a_value.c_str());
-                return 2;
-            }
-
-            const std::string v = argv[++i];
-            *time = psf::ParseTime(v);
-            if (*time < 0)
-            {
-                std::fprintf(stderr, "error: bad time for %s: '%s'\n", a.c_str(), v.c_str());
-                return 2;
-            }
-        }
-    }
-
-    if (inputs.empty())
+    const auto option = [&o](const std::string& a, OptionValue& value)
     {
-        PrintUsage(tool, stderr);
-        return 2;
+        return TakePlayOption(a, value, o);
+    };
+
+    if (const int parsed = ParseArguments(tool, argc, argv, usage, option, inputs))
+    {
+        return parsed;
     }
 
     if (!o.out.empty() && inputs.size() > 1)
@@ -336,21 +341,20 @@ int Run(const PlayTool<Player>& tool, int argc, char** argv)
     namespace fs = std::filesystem;
 
     PlayOptions<Player> o;
-    std::vector<std::string> inputs;
-    if (const int parsed = ParseArgs(tool, argc, argv, o, inputs))
+    const auto parse = [&](std::vector<std::string>& inputs)
     {
-        return parsed < 0 ? 0 : parsed;
-    }
+        return ParseArgs(tool, argc, argv, o, inputs);
+    };
 
-    if (!InputsExist(inputs, "file"))
+    const auto before = [&tool](std::vector<std::string>&)
     {
-        return 1;
-    }
+        if (tool.before_inputs)
+        {
+            tool.before_inputs();
+        }
 
-    if (tool.before_inputs)
-    {
-        tool.before_inputs();
-    }
+        return 0;
+    };
 
     // Renders one input. A folder fails. A library is skipped: the minis load it.
     const auto render = [&](const std::string& in)
@@ -371,7 +375,8 @@ int Run(const PlayTool<Player>& tool, int argc, char** argv)
         const fs::path out = o.out.empty() ? fs::path(in).replace_extension(".wav") : fs::path(o.out);
         return Render(tool, in, out, o);
     };
-    return RunEachInput(inputs, render);
+
+    return RunInputs(parse, "file", before, render);
 }
 
 } // namespace detail

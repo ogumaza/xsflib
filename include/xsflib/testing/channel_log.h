@@ -10,6 +10,8 @@
 // main send and the sends to aux buses A to C. A frame in which no channel sounds has a line with note 0 and the random
 // numbers' state. The notes are numbered from 1 in the order they start. A note starts when its channel appears, or
 // when a channel takes a new key or comes out of its release.
+//
+// A test that includes this header links xsflib::common for WriteFile (xsflib/files.h).
 
 #pragma once
 
@@ -20,8 +22,11 @@
 #include <fstream>
 #include <ios>
 #include <map>
+#include <optional>
+#include <string>
 #include <vector>
 
+#include "xsflib/files.h"
 #include "xsflib/wav.h"
 
 namespace xsflib::testing
@@ -46,12 +51,10 @@ struct ChannelState
     std::array<float, 3> fx_send{}; // and the sends to the aux buses A to C: D9, DA and DE / 127, plus additions
 };
 
-// Writes `samples`, stereo frames at 48 kHz, as a 16-bit WAV file.
-inline void WriteWav(const std::filesystem::path& path, const std::vector<int16_t>& samples)
+// Writes `samples`, stereo frames at 48 kHz, as a 16-bit WAV file. Returns WriteFile's error, or nothing.
+inline std::optional<std::string> WriteWav(const std::filesystem::path& path, const std::vector<int16_t>& samples)
 {
-    const std::vector<uint8_t> file = WavFile(samples, 2, 48000);
-    std::ofstream out(path, std::ios::binary);
-    out.write(reinterpret_cast<const char*>(file.data()), static_cast<std::streamsize>(file.size()));
+    return WriteFile(path, WavFile(samples, 2, 48000));
 }
 
 // A channel log, written a frame at a time (see the file comment).
@@ -101,6 +104,7 @@ public:
                               static_cast<double>(c.fx_send[2]));
                 out_ << line;
             }
+
             out_ << '\n';
         }
 

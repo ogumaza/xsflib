@@ -22,7 +22,7 @@ namespace xsflib::psf
 // A MEM chunk: data to load at `address` in the emulated memory.
 struct MemChunk
 {
-    uint32_t address;
+    uint32_t address = 0;
     std::vector<uint8_t> data;
 };
 

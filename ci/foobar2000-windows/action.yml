@@ -11,7 +11,7 @@ inputs:
     description: The component's target, such as foo_input_xyz
     required: true
   foobar2000-version:
-    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's pin
     required: false
     default: ""
   foobar2000-sha256:
@@ -22,10 +22,6 @@ runs:
   using: composite
   steps:
     - name: Download the foobar2000 SDK
-      if: inputs.foobar2000-version == ''
-      uses: ./externals/xsflib/ci/foobar2000-sdk
-    - name: Download the project's foobar2000 SDK
-      if: inputs.foobar2000-version != ''
       uses: ./externals/xsflib/ci/foobar2000-sdk
       with:
         version: ${{ inputs.foobar2000-version }}

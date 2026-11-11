@@ -2,14 +2,12 @@
 
 // Checks RunTest (xsflib/testing/check.h): the exit status and the output of a test whose checks pass, fail or throw.
 
-#include <ostream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
 #include "xsflib/testing/check.h"
 
-using xsflib::testing::failures;
+using seqlib::testing::Capture;
 
 namespace
 {
@@ -19,20 +17,8 @@ namespace
 template <typename Body>
 int StatusOf(Body body, std::string& output)
 {
-    std::ostringstream caught;
-    std::ostream* const failure_stream = seqlib::testing::failure_stream;
-    std::ostream* const success_stream = seqlib::testing::success_stream;
-    seqlib::testing::failure_stream = &caught;
-    seqlib::testing::success_stream = &caught;
-    const int before = failures;
-    failures = 0;
-
-    const int status = xsflib::testing::RunTest("inner", body);
-
-    failures = before;
-    seqlib::testing::failure_stream = failure_stream;
-    seqlib::testing::success_stream = success_stream;
-    output = caught.str();
+    int status = 0;
+    output = Capture([&] { status = xsflib::testing::RunTest("inner", body); }).text;
 
     return status;
 }
@@ -64,7 +50,10 @@ void TestRunTest()
 
 int main()
 {
-    TestRunTest();
+    const auto tests = []
+    {
+        TestRunTest();
+    };
 
-    return xsflib::testing::Summary("testing check");
+    return xsflib::testing::RunTest("testing check", tests);
 }

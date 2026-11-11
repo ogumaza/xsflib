@@ -30,7 +30,8 @@ constexpr auto kAbortPoll = std::chrono::milliseconds(20);
 // buffered audio available for backward seeks.
 std::size_t BlockFrames(uint64_t keep_frames, int sample_rate)
 {
-    return static_cast<std::size_t>(std::clamp<uint64_t>(keep_frames / 8, 1, static_cast<uint64_t>(sample_rate)));
+    return static_cast<std::size_t>(
+        std::clamp<uint64_t>(keep_frames / 8, 1, static_cast<uint64_t>(std::max(sample_rate, 1))));
 }
 
 } // namespace
@@ -171,37 +172,9 @@ void RenderAhead::Loop()
     std::unique_lock lock(mutex_);
     while (!stop_)
     {
-        if (handled_ != seeks_)
+        if (handled_ != seeks_ && HandleSeek(lock, held))
         {
-            handled_ = seeks_;
-
-            // Keep rendering if the target is buffered, pending, or quicker to reach without a source seek. Otherwise
-            // seek the source and discard the buffer. The buffer must cover one continuous range.
-            const uint64_t target = read_;
-            const uint64_t position = end_ + held; // source position
-            if (target < start_ || (target > position && source_->SeekStart(target) > position))
-            {
-                blocks_.clear();
-                held = 0;
-                start_ = end_ = target;
-                ended_ = false;
-                error_.clear();
-                const uint64_t seek = handled_;
-                lock.unlock();
-                const bool moved = source_->Seek(target, [&] { return stop_ || seeks_ != seek; });
-
-                // A seek cancelled by another seek or by shutdown is not an error.
-                std::string error = moved ? std::string() : source_->Error();
-                const uint64_t landed = source_->Position();
-                lock.lock();
-                start_ = end_ = landed;
-                error_ = std::move(error);
-                rendered_.notify_all();
-                continue;
-            }
-
-            // Wake readers waiting for this seek to be handled.
-            rendered_.notify_all();
+            continue;
         }
 
         if (held > 0)
@@ -247,6 +220,42 @@ void RenderAhead::Loop()
 
         rendered_.notify_all();
     }
+}
+
+bool RenderAhead::HandleSeek(std::unique_lock<std::mutex>& lock, std::size_t& held)
+{
+    handled_ = seeks_;
+
+    // Keep rendering if the target is buffered, pending, or quicker to reach without a source seek. Otherwise seek the
+    // source and discard the buffer. The buffer must cover one continuous range.
+    const uint64_t target = read_;
+    const uint64_t position = end_ + held; // source position
+    if (target < start_ || (target > position && source_->SeekStart(target) > position))
+    {
+        blocks_.clear();
+        held = 0;
+        start_ = end_ = target;
+        ended_ = false;
+        error_.clear();
+        const uint64_t seek = handled_;
+        lock.unlock();
+        const bool moved = source_->Seek(target, [&] { return stop_ || seeks_ != seek; });
+
+        // A seek cancelled by another seek or by shutdown is not an error.
+        std::string error = moved ? std::string() : source_->Error();
+        const uint64_t landed = source_->Position();
+        lock.lock();
+        start_ = end_ = landed;
+        error_ = std::move(error);
+        rendered_.notify_all();
+
+        return true;
+    }
+
+    // Wake readers waiting for this seek to be handled.
+    rendered_.notify_all();
+
+    return false;
 }
 
 bool RenderAhead::HasRoom(std::size_t frames) const

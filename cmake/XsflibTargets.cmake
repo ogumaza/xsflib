@@ -50,6 +50,13 @@ function(xsflib_set_flags target)
         target_compile_options(${target} PRIVATE -Wall -Wextra)
     endif()
 
+    # A designated initializer names only the fields that differ from their defaults, and some defaults aren't zero.
+    # Initializers that named every field would repeat those defaults, and the copies could drift from them. Under
+    # clang-cl, /W4 includes -Wmissing-designated-field-initializers from clang 19 on. The warning is off there.
+    if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19)
+        target_compile_options(${target} PRIVATE -Wno-missing-designated-field-initializers)
+    endif()
+
     xsflib_float_options(float_options)
     target_compile_options(${target} PRIVATE ${float_options})
 

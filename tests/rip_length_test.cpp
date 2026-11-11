@@ -2,8 +2,10 @@
 
 // Tests the length analysis (rip/length.h) on a scripted model: the timing helpers, loops, other tracks that hold the
 // fade back, a loop with no sound after its first pass, a sequence that never sounds, the ends, the busy silence, the
-// limit, a steady sequence, ringing effects, a failing frame, and the rules that differ between models.
+// limit, a steady sequence, ringing effects, a failing frame, the rules that differ between models, and a model that
+// follows only its output.
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <new>
@@ -175,6 +177,28 @@ void TestTimings()
     XSFLIB_CHECK(end.length_ms == 1000 && end.fade_ms == 0 && !end.silent);
     XSFLIB_CHECK(loop.length_ms == 999 && loop.fade_ms == 10000);
     XSFLIB_CHECK(rip::EndAt(1, 2.5, 0.0).length_ms == 3);
+}
+
+// Sequences that play together end with the latest of them and fade as the longest fade. A silent sequence doesn't
+// count unless all are silent. A sequence without a timing leaves the piece without one.
+void TestTimingOfPiece()
+{
+    const rip::Timing short_loop = {.length_ms = 1000, .fade_ms = 10000};
+    const rip::Timing long_end = {.length_ms = 5000, .fade_ms = 0};
+    const rip::Timing silent = {.length_ms = 9000, .fade_ms = 20000, .silent = true};
+
+    const std::optional<rip::Timing> piece = rip::TimingOfPiece({silent, short_loop, long_end});
+    XSFLIB_CHECK(piece && piece->length_ms == 5000 && piece->fade_ms == 10000 && !piece->silent);
+
+    const rip::Timing short_silent = {.length_ms = 2000, .silent = true};
+    const std::optional<rip::Timing> quiet = rip::TimingOfPiece({silent, short_silent});
+    XSFLIB_CHECK(quiet && quiet->length_ms == 9000 && quiet->fade_ms == 20000 && quiet->silent);
+
+    const std::optional<rip::Timing> alone = rip::TimingOfPiece({short_loop});
+    XSFLIB_CHECK(alone && alone->length_ms == 1000 && alone->fade_ms == 10000);
+
+    XSFLIB_CHECK(!rip::TimingOfPiece({short_loop, std::nullopt}));
+    XSFLIB_CHECK(!rip::TimingOfPiece({}));
 }
 
 void TestLoops()
@@ -437,32 +461,198 @@ void TestFailures()
     XSFLIB_CHECK(!rip::TryMeasure([]() -> std::optional<rip::Timing> { throw std::runtime_error("damaged bank"); }));
 
     // TryMeasure rethrows std::bad_alloc.
-    bool rethrown = false;
-    try
+    const auto out_of_memory = []
     {
         rip::TryMeasure([]() -> std::optional<rip::Timing> { throw std::bad_alloc(); });
-    }
-    catch (const std::bad_alloc&)
+    };
+
+    XSFLIB_CHECK(!ErrorOf<std::bad_alloc>(out_of_memory).empty());
+}
+
+// A model that follows its output alone. It has none of the tests from Ringing to ActiveChannels. A script sets each
+// frame's sound and may go round loops.
+struct OutputModel
+{
+    bool RunFrame()
     {
-        rethrown = true;
+        script(*this, frames);
+        frames++;
+
+        return true;
     }
 
-    XSFLIB_CHECK(rethrown);
+    void Loop(int track, uint32_t target)
+    {
+        on_loop(track, target);
+    }
+
+    template <typename F>
+    void OnLoop(F f)
+    {
+        on_loop = std::move(f);
+    }
+
+    bool Sounded() const
+    {
+        return sound;
+    }
+
+    std::function<void(OutputModel&, uint64_t)> script;
+    std::function<void(int, uint32_t)> on_loop;
+    uint64_t frames = 0; // the frames run so far
+    bool sound = false;
+};
+
+// An output model with each test written out, as the answer that MeasureLength takes for a missing test.
+struct StubbedOutputModel : OutputModel
+{
+    bool Ringing() const
+    {
+        return false;
+    }
+
+    std::size_t VoiceCount() const
+    {
+        return 0;
+    }
+
+    rip::VoicePlace Voice(std::size_t) const
+    {
+        return {};
+    }
+
+    bool Active() const
+    {
+        return false;
+    }
+
+    bool Settled() const
+    {
+        return false;
+    }
+
+    bool Stuck() const
+    {
+        return false;
+    }
+
+    bool Moving() const
+    {
+        return false;
+    }
+
+    uint64_t ChangedAt() const
+    {
+        return 0;
+    }
+
+    bool Busy() const
+    {
+        return true;
+    }
+
+    bool ChannelsChanging() const
+    {
+        return false;
+    }
+
+    int ActiveChannels() const
+    {
+        return 0;
+    }
+};
+
+// An output model with one test: its engine is busy while it sounds.
+struct BusyOutputModel : OutputModel
+{
+    bool Busy() const
+    {
+        return sound;
+    }
+};
+
+// The timing of the sequence that `script` plays on a `Model`, and the frames that the analysis ran.
+template <typename Model>
+std::pair<std::optional<rip::Timing>, uint64_t> MeasureOutput(const std::function<void(OutputModel&, uint64_t)>& script)
+{
+    rip::LengthRules rules;
+    rules.max_frames = 5000;
+    rules.max_ms = 15000.0;
+    rules.silent_frames = 1000;
+    Model model;
+    model.script = script;
+    const std::optional<rip::Timing> timing = rip::MeasureLength(model, rules);
+
+    return {timing, model.frames};
+}
+
+// A model without the tests from Ringing to ActiveChannels measures as a model whose tests give the answers of an
+// output model: its sequences end when they loop twice, when they fall silent for 1000 frames, or at the limit. A model
+// that gives one of the tests uses it.
+void TestOutputModel()
+{
+    const auto falls_silent = [](OutputModel& model, uint64_t frame)
+    {
+        model.sound = frame < 100;
+    };
+
+    const auto loops = [](OutputModel& model, uint64_t frame)
+    {
+        model.sound = true;
+        if (frame % 200 == 199)
+        {
+            model.Loop(0, 4);
+        }
+    };
+
+    const auto endless = [](OutputModel& model, uint64_t)
+    {
+        model.sound = true;
+    };
+
+    const auto silent = [](OutputModel&, uint64_t) {};
+
+    const auto [silence, silence_frames] = MeasureOutput<OutputModel>(falls_silent);
+    const auto [stubbed_silence, stubbed_silence_frames] = MeasureOutput<StubbedOutputModel>(falls_silent);
+    const auto [looped, looped_frames] = MeasureOutput<OutputModel>(loops);
+    const auto [stubbed_looped, stubbed_looped_frames] = MeasureOutput<StubbedOutputModel>(loops);
+    const auto [limit, limit_frames] = MeasureOutput<OutputModel>(endless);
+    const auto [stubbed_limit, stubbed_limit_frames] = MeasureOutput<StubbedOutputModel>(endless);
+    const auto [never, never_frames] = MeasureOutput<OutputModel>(silent);
+    const auto [stubbed_never, stubbed_never_frames] = MeasureOutput<StubbedOutputModel>(silent);
+    const auto [idle, idle_frames] = MeasureOutput<BusyOutputModel>(falls_silent);
+
+    XSFLIB_CHECK(Is(silence, 800, 0) && silence_frames == 1100);
+    XSFLIB_CHECK(Is(stubbed_silence, 800, 0) && stubbed_silence_frames == 1100);
+    XSFLIB_CHECK(Is(looped, 1200, 10000) && looped_frames == 400);
+    XSFLIB_CHECK(Is(stubbed_looped, 1200, 10000) && stubbed_looped_frames == 400);
+    XSFLIB_CHECK(Is(limit, 15000, 10000) && limit_frames == 5000);
+    XSFLIB_CHECK(Is(stubbed_limit, 15000, 10000) && stubbed_limit_frames == 5000);
+    XSFLIB_CHECK(Is(never, 500, 0, true) && never_frames == 1001);
+    XSFLIB_CHECK(Is(stubbed_never, 500, 0, true) && stubbed_never_frames == 1001);
+
+    // The engine falls idle with the sound. The sequence ends after 10 idle frames.
+    XSFLIB_CHECK(Is(idle, 800, 0) && idle_frames == 111);
 }
 
 } // namespace
 
 int main()
 {
-    TestTimings();
-    TestLoops();
-    TestOthersLooped();
-    TestLoopWithoutSound();
-    TestEnds();
-    TestBusySilenceAndLimit();
-    TestSteady();
-    TestRinging();
-    TestFailures();
+    const auto tests = []
+    {
+        TestTimings();
+        TestTimingOfPiece();
+        TestLoops();
+        TestOthersLooped();
+        TestLoopWithoutSound();
+        TestEnds();
+        TestBusySilenceAndLimit();
+        TestSteady();
+        TestRinging();
+        TestFailures();
+        TestOutputModel();
+    };
 
-    return xsflib::testing::Summary("rip length");
+    return xsflib::testing::RunTest("rip length", tests);
 }

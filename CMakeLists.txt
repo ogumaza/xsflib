@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20)
-project(xsflib VERSION 1.9.0 LANGUAGES C CXX)
+project(xsflib VERSION 1.10.0 LANGUAGES C CXX)
 
 # CMake 3.20 has no PROJECT_IS_TOP_LEVEL. xsflib is the top-level project when the build starts in its folder.
 if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
@@ -42,9 +42,20 @@ if (XSFLIB_TESTS)
     enable_testing()
 endif()
 
-# The runner of a test's checks, and the channel log and the WAV writer of play tests.
+# Adds a test (xsflib_add_test) that passes paths to xsflib as UTF-8 strings. On Windows, the test gets the UTF-8
+# manifest of the command-line tools. Narrow strings in the test are then UTF-8.
+function(xsflib_add_utf8_test name)
+    xsflib_add_test(${name} ${ARGN})
+    if (TARGET xsflib_${name}_test)
+        xsflib_add_utf8_manifest(xsflib_${name}_test)
+    endif()
+endfunction()
+
+# The runner of a test's checks.
 xsflib_add_test(testing_check)
-xsflib_add_test(channel_log)
+
+# The tally of the oracle tests and their generator of inputs.
+xsflib_add_test(testing_oracle_tally)
 
 # The common files: byte order, bounds-checked reads, ASCII, UTF-8 names, numbers as text, files and their UTF-8
 # paths, WAV files, SHA-1, SHA-256 and memory images.
@@ -52,12 +63,15 @@ xsflib_add_library(common src/common/files.cpp src/common/sha1.cpp src/common/sh
                    src/common/utf8.cpp)
 xsflib_add_test(binary xsflib::common)
 xsflib_add_test(files xsflib::common)
-xsflib_add_test(sha1 xsflib::common)
-xsflib_add_test(sha256 xsflib::common)
+xsflib_add_test(sha xsflib::common)
 xsflib_add_test(utf8 xsflib::common)
+xsflib_add_test(utf16 xsflib::common)
 xsflib_add_test(samples_sha256 xsflib::common)
-xsflib_add_test(snapshot xsflib::common)
+xsflib_add_test(memory_image xsflib::common)
 xsflib_add_test(wav xsflib::common seqlib::seqlib)
+
+# The channel log and the WAV writer of play tests.
+xsflib_add_test(channel_log xsflib::common)
 
 # The console of a command-line tool: the arguments in UTF-8, UTF-8 or line-buffered output, and a window that waits
 # before it closes. It links nothing but Windows' shell32.
@@ -72,10 +86,11 @@ xsflib_add_test(console xsflib::console)
 if (XSFLIB_CLI)
     xsflib_add_library(cli src/cli/audio_out.cpp)
     target_link_libraries(xsflib_cli PUBLIC xsflib::common xsflib::console PRIVATE xsflib::flac)
-    xsflib_add_test(audio_out xsflib::cli xsflib::common xsflib::flac)
+    xsflib_add_utf8_test(audio_out xsflib::cli xsflib::common xsflib::flac)
     if (XSFLIB_PSF)
-        xsflib_add_test(play xsflib::cli xsflib::player)
-        xsflib_add_test(rip_frame xsflib::cli xsflib::rip xsflib::psf)
+        xsflib_add_utf8_test(play xsflib::cli xsflib::player)
+        xsflib_add_utf8_test(rip_frame xsflib::cli xsflib::rip xsflib::psf)
+        xsflib_add_test(cli_args xsflib::cli xsflib::rip xsflib::psf)
     endif()
 endif()
 
@@ -90,7 +105,6 @@ if (XSFLIB_PSF)
     target_link_libraries(xsflib_psf PUBLIC xsflib::psf_container xsflib::common PRIVATE xsflib::zlib)
     xsflib_add_test(psf xsflib::psf xsflib::zlib)
     xsflib_add_test(psf_set xsflib::psf)
-    xsflib_add_test(testing_sets xsflib::psf)
     xsflib_add_test(psf_descriptor xsflib::psf)
     xsflib_add_test(psf_streaming xsflib::psf xsflib::zlib)
 endif()
@@ -105,12 +119,15 @@ if (XSFLIB_PSF)
     xsflib_add_test(player_base xsflib::player)
     xsflib_add_test(archive_source xsflib::player)
     xsflib_add_test(player_modes xsflib::player)
+
+    # The helpers for the tests of PSF sets, and the checks of seeks in a whole track.
+    xsflib_add_test(testing_sets xsflib::player)
 endif()
 
 # Code for rip tools: the names of a rip's files, the inputs' names and output folders, and the length analysis.
 xsflib_add_library(rip src/rip/file_names.cpp src/rip/length.cpp src/rip/tool.cpp)
 target_link_libraries(xsflib_rip PUBLIC xsflib::common)
-xsflib_add_test(file_names xsflib::rip)
+xsflib_add_utf8_test(file_names xsflib::rip)
 xsflib_add_test(rip_length xsflib::rip)
 
 # The ROM sets of arcade boards, as ZIP archives or folders of their chips. The reader of ZIP archives requires zlib.

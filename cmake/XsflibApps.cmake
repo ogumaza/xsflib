@@ -6,12 +6,18 @@
 
 # Gives `target` the version `VERSION`. The target's sources get the version as the string macro `DEFINE`, if given. On
 # Windows, the target also gets the version resource that Explorer shows in the file's properties, with DESCRIPTION,
-# PRODUCT and COPYRIGHT.
+# PRODUCT and COPYRIGHT. VERSION must be X.Y.Z.
 #
 #   xsflib_add_version(xyzplay VERSION ${xyz_VERSION} DEFINE XYZ_VERSION DESCRIPTION "xyz renderer" PRODUCT xyz
 #                      COPYRIGHT "Copyright (c) 2026 the xyz authors. MIT licence.")
 function(xsflib_add_version target)
     cmake_parse_arguments(arg "" "VERSION;DEFINE;DESCRIPTION;PRODUCT;COPYRIGHT" "" ${ARGN})
+    if (NOT arg_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+        message(FATAL_ERROR "xsflib_add_version(${target}): VERSION is \"${arg_VERSION}\". It must be X.Y.Z.")
+    endif()
+    set(version_major ${CMAKE_MATCH_1})
+    set(version_minor ${CMAKE_MATCH_2})
+    set(version_patch ${CMAKE_MATCH_3})
     if (arg_DEFINE)
         target_compile_definitions(${target} PRIVATE ${arg_DEFINE}="${arg_VERSION}")
     endif()
@@ -25,11 +31,10 @@ function(xsflib_add_version target)
             set(VERSION_FILE_TYPE VFT_DLL)
             set(VERSION_FILE_NAME ${target}${CMAKE_SHARED_LIBRARY_SUFFIX})
         endif()
-        string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" version_parts ${arg_VERSION})
         set(VERSION ${arg_VERSION})
-        set(VERSION_MAJOR ${CMAKE_MATCH_1})
-        set(VERSION_MINOR ${CMAKE_MATCH_2})
-        set(VERSION_PATCH ${CMAKE_MATCH_3})
+        set(VERSION_MAJOR ${version_major})
+        set(VERSION_MINOR ${version_minor})
+        set(VERSION_PATCH ${version_patch})
         set(VERSION_DESCRIPTION ${arg_DESCRIPTION})
         set(VERSION_NAME ${target})
         set(VERSION_PRODUCT ${arg_PRODUCT})
@@ -49,13 +54,25 @@ function(xsflib_add_utf8_manifest target)
     endif()
 endfunction()
 
+# macOS: writes the droplet script `output`: `text` with each @VAR@ replaced, followed by the handlers that the droplet
+# scripts share (templates/droplet_handlers.applescript). `text` comes from the file `source`. CMake runs again when
+# `source` or the handlers change.
+function(xsflib_write_droplet_script output source text)
+    set(handlers ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/droplet_handlers.applescript)
+    file(READ ${handlers} handlers_text)
+    file(CONFIGURE OUTPUT ${output} CONTENT "${text}\n${handlers_text}" @ONLY)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${source} ${handlers})
+endfunction()
+
 # macOS: a droplet app for the command-line tool `tool`. Files dropped on the app in the Finder go to the tool. The
 # app is an AppleScript applet with the tool inside, in Contents/Resources. The app's Info.plist holds VERSION. The app
 # is APP_NAME.app (by default, tool.app). The app's script is SCRIPT. By default, it's the rip and play tools' droplet
-# script with `tool` filled in. RESOURCES are files that go into Contents/Resources beside the tool, such as the
-# licences that a package ships. A relative path is relative to the current source folder.
+# script with `tool` filled in. With HANDLERS, the app's script is SCRIPT with each @VAR@ replaced, followed by the
+# handlers that the droplet scripts share: showResults, lastPathComponent, lastLine and joinLines. RESOURCES are files
+# that go into Contents/Resources beside the tool, such as the licences that a package ships. A relative path is
+# relative to the current source folder.
 function(xsflib_add_droplet tool)
-    cmake_parse_arguments(arg "" "VERSION;SCRIPT;APP_NAME" "RESOURCES" ${ARGN})
+    cmake_parse_arguments(arg "HANDLERS" "VERSION;SCRIPT;APP_NAME" "RESOURCES" ${ARGN})
     if (NOT arg_APP_NAME)
         set(arg_APP_NAME ${tool})
     endif()
@@ -71,12 +88,18 @@ function(xsflib_add_droplet tool)
     endif()
 
     set(droplet_app ${CMAKE_BINARY_DIR}/${arg_APP_NAME}.app)
-    if (arg_SCRIPT)
-        set(droplet_script ${arg_SCRIPT})
-    else()
+    set(droplet_script ${CMAKE_BINARY_DIR}/${tool}.applescript)
+    if (NOT arg_SCRIPT)
         set(DROPLET_TOOL ${tool})
-        set(droplet_script ${CMAKE_BINARY_DIR}/${tool}.applescript)
-        configure_file(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/droplet.applescript.in ${droplet_script} @ONLY)
+        set(source ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/droplet.applescript.in)
+        file(READ ${source} script)
+        xsflib_write_droplet_script(${droplet_script} ${source} "${script}")
+    elseif (arg_HANDLERS)
+        get_filename_component(source ${arg_SCRIPT} ABSOLUTE)
+        file(READ ${source} script)
+        xsflib_write_droplet_script(${droplet_script} ${source} "${script}")
+    else()
+        set(droplet_script ${arg_SCRIPT})
     endif()
     set(resources)
     foreach (resource IN LISTS arg_RESOURCES)
@@ -119,7 +142,8 @@ function(xsflib_add_droplet_tool tool)
 
     # The template marks the lines of each note with a comment at their end. Keep a note's lines without the mark, or
     # drop them. The lines that both notes share go with either.
-    file(READ ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/droplet_tool.applescript.in script)
+    set(source ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/droplet_tool.applescript.in)
+    file(READ ${source} script)
     set(keep_truncated ${arg_TRUNCATED})
     set(keep_groups ${arg_GROUPS})
     if (arg_TRUNCATED OR arg_GROUPS)
@@ -139,11 +163,25 @@ function(xsflib_add_droplet_tool tool)
     set(TOOL_APP ${arg_APP_NAME})
     set(TOOL_DESCRIPTION ${arg_DESCRIPTION})
     set(TOOL_PROMPT ${arg_PROMPT})
-    string(CONFIGURE "${script}" script @ONLY)
     set(droplet_script ${CMAKE_BINARY_DIR}/${tool}.applescript)
-    file(CONFIGURE OUTPUT ${droplet_script} CONTENT "${script}" @ONLY)
+    xsflib_write_droplet_script(${droplet_script} ${source} "${script}")
     xsflib_add_droplet(${tool} VERSION ${arg_VERSION} SCRIPT ${droplet_script} APP_NAME ${arg_APP_NAME}
                        RESOURCES ${arg_RESOURCES})
+endfunction()
+
+# A test that `program --version` prints "<program> VERSION" and nothing else. The test is NAME, by default
+# <program>_version.
+#
+#   xsflib_add_version_test(xyzplay VERSION ${PROJECT_VERSION})
+function(xsflib_add_version_test program)
+    cmake_parse_arguments(arg "" "VERSION;NAME" "" ${ARGN})
+    if (NOT arg_NAME)
+        set(arg_NAME ${program}_version)
+    endif()
+
+    string(REPLACE "." "\\." version_pattern "${arg_VERSION}")
+    add_test(NAME ${arg_NAME} COMMAND ${program} --version)
+    set_tests_properties(${arg_NAME} PROPERTIES PASS_REGULAR_EXPRESSION "^${program} ${version_pattern}[\r\n]*$")
 endfunction()
 
 # The tests of the sequence converter `converter`. <converter>_version checks that the converter reports VERSION.
@@ -160,10 +198,7 @@ function(xsflib_add_converter_tests converter)
     add_executable(${converter}_test ${PROJECT_SOURCE_DIR}/tests/${converter}_test.cpp)
     target_link_libraries(${converter}_test PRIVATE ${arg_LIBRARIES})
 
-    string(REPLACE "." "\\." version_pattern "${arg_VERSION}")
-    add_test(NAME ${converter}_version COMMAND ${converter} --version)
-    set_tests_properties(${converter}_version PROPERTIES PASS_REGULAR_EXPRESSION
-                                                        "^${converter} ${version_pattern}[\r\n]*$")
+    xsflib_add_version_test(${converter} VERSION ${arg_VERSION})
 
     add_test(NAME ${converter}_var_range COMMAND ${converter} --var 32=1 missing${arg_EXTENSION})
     set_tests_properties(${converter}_var_range PROPERTIES PASS_REGULAR_EXPRESSION "--var 32=1 is out of range")

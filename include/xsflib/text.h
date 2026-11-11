@@ -2,6 +2,7 @@
 
 // Numbers as text, the same in every locale: hex for messages, and whole numbers and assignments "N=V" from options and
 // tags.
+// SplitList gives the items of a list in an option or a tag.
 
 #pragma once
 
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace xsflib
 {
@@ -21,8 +23,8 @@ std::string Hex(uint32_t value, int digits = 0, bool upper = false);
 // A number read from the start of a text, and the number of characters it took.
 struct DecimalNumber
 {
-    double value;
-    std::size_t length;
+    double value = 0.0;
+    std::size_t length = 0;
 };
 
 // How ReadDecimal reads a number.
@@ -78,5 +80,13 @@ struct Assignment
 // One assignment "N=V", the whole of `text`: ParseInteger's numbers by `rules` before and after the first '='. Returns
 // nothing if `text` has no '=' or either side isn't such a number. The caller checks each number's range.
 std::optional<Assignment> ParseAssignment(std::string_view text, const IntegerRules& rules = {});
+
+// The characters that separate the items of a list in an option or a tag, such as "0=1, 17=-1": commas and white space,
+// line breaks included.
+inline constexpr std::string_view kListSeparators = ", \t\r\n";
+
+// The items of a list in `text`: the runs of characters between kListSeparators, in order. Separators may repeat, and
+// may come first or last. A text of separators alone has no items.
+std::vector<std::string_view> SplitList(std::string_view text);
 
 } // namespace xsflib

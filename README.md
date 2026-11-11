@@ -11,9 +11,9 @@ Each module is a static library. A project links the ones it uses.
 | `xsflib::common` | Byte order, bounds-checked reads of binary files, ASCII and UTF-8 helpers, numbers as text, files and their UTF-8 paths, WAV files, SHA-1, SHA-256 and memory images |
 | `xsflib::console` | A command-line tool's console: the arguments in UTF-8 on Windows, UTF-8 or line-buffered output, and a window that waits before it closes |
 | `xsflib::psf_container` | The PSF container without zlib: the header, the tags and the times in them. A reader passes its decompressor |
-| `xsflib::psf` | The PSF container with zlib's decompressor and writer. Also the programs and sets of the formats that copy a set's files into their programs, and of the formats that hold each file once |
+| `xsflib::psf` | The PSF container with zlib's decompressor and writer. Also the programs and sets of the formats that copy a set's files into their programs, and of the formats that hold each file once. The walk over a set's files that those loaders use serves other formats too |
 | `xsflib::player` | A template of playback with length, fade and seeking on a format's player. Also the parts that every format's player shares, and rendering ahead on a worker thread |
-| `xsflib::cli` | WAV and FLAC output and the frames of a format's play tool and rip tool. It links `xsflib::console` |
+| `xsflib::cli` | WAV and FLAC output, the frames of a format's play tool and rip tool, and a tool's jobs spread over threads. It links `xsflib::console` |
 | `xsflib::rip` | The names of a rip's files, functions for rip tools, and the length analysis that times a sequence on a model of a game's sound code |
 | `xsflib::rom_set` | The ROM sets of arcade boards: a reader of ZIP archives, and a loader that finds a game's chips by SHA-1 and size in an archive or a folder and puts the image together. Requires zlib, and is built when `xsflib::zlib` exists |
 
@@ -22,6 +22,10 @@ Each module is a static library. A project links the ones it uses.
 checks for unit tests, a channel log, the SHA-256 of a render's samples (`testing/samples_sha256.h`), helpers for the
 tests of a format's sets (`testing/sets.h`) and a new temporary folder for each run of a test (`testing/temp_folder.h`).
 The channel log records a sound's output and its channels. Two logs of one sound can be compared line by line.
+`xsflib::testing` also checks the seeks in a whole track (`testing/seeks.h`), builds ZIP archives in memory
+(`testing/zip_archive.h`) and makes the arguments of a program's main from strings (`testing/command_line.h`).
+It reads FLAC recordings with libFLAC (`testing/flac.h`, which requires `xsflib::flac`). It also counts the cases in
+which a model of the game code and the game code differ (`testing/oracle_tally.h`).
 
 `cmake/XsflibApps.cmake` builds common parts of a program: the Windows version resource, the macOS droplet apps, the
 foobar2000 component and the XMPlay plugin. A project includes `cmake/XsflibProject.cmake` from its submodule before it
@@ -44,8 +48,9 @@ xsflib requires CMake 3.20 or later and a C++20 compiler. The tests' checks come
 clone. Without the submodule, the build requires an installed seqlib.
 
 xsflib supports macOS on Apple Silicon and Windows x64 built with clang-cl. Other platforms and compilers aren't
-supported. An XMPlay plugin is the exception. XMPlay is a 32-bit program, and its plugins build for 32-bit Windows
-with clang-cl (`-A Win32 -T ClangCL`).
+supported. An XMPlay plugin and a foobar2000 component for 32-bit foobar2000 are the exceptions. XMPlay is a 32-bit
+program, and its plugins build for 32-bit Windows with clang-cl (`-A Win32 -T ClangCL`). The 32-bit component builds
+the same way.
 
 - **Windows x64**: Visual Studio 2022 with the C++ workload and its "C++ Clang tools for Windows" component. Configure
   with `cmake -S . -B build -A x64 -T ClangCL` in place of the first command below.
@@ -58,8 +63,8 @@ cmake --build build --config Release
 ctest --test-dir build -C Release
 ```
 
-The PSF container requires zlib, and FLAC output requires libFLAC. An installed copy of each library is used if CMake
-finds one. Otherwise CMake downloads and builds it.
+`xsflib::psf` and `xsflib::rom_set` require zlib, and FLAC output requires libFLAC. An installed copy of each library
+is used if CMake finds one. Otherwise CMake downloads and builds it.
 
 Output is meant to be the same on both platforms. xsflib turns off the contraction of floating-point operations into
 fused multiply-adds. A project that includes xsflib's headers should build its sources the same way.

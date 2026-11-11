@@ -38,7 +38,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -55,6 +54,7 @@
 #include "xsflib/ascii.h"
 #include "xsflib/player/playback.h"
 #include "xsflib/player/render_ahead.h"
+#include "xsflib/psf/plugin_tags.h"
 #include "xsflib/psf/psf.h"
 
 namespace xsflib::foobar2000
@@ -111,36 +111,6 @@ namespace detail
 {
 
 constexpr std::size_t kBlockFrames = 1024; // frames decoded per decode_run call
-
-// The foobar2000 field name for a PSF tag name.
-inline std::string FieldFromTag(const std::string& tag)
-{
-    if (tag == "game")
-    {
-        return "album";
-    }
-    if (tag == "year")
-    {
-        return "date";
-    }
-
-    return tag;
-}
-
-// The PSF tag name for a foobar2000 field name.
-inline std::string TagFromField(const std::string& field)
-{
-    if (field == "album")
-    {
-        return "game";
-    }
-    if (field == "date")
-    {
-        return "year";
-    }
-
-    return field;
-}
 
 // PSF tags are UTF-8 when the file has a utf8 tag. Without one, text that isn't valid UTF-8 is read as the system code
 // page on Windows and as Windows-1252 elsewhere. pfc converts "ANSI" text the same way outside Windows.
@@ -200,23 +170,16 @@ public:
                 continue;
             }
 
-            const std::string field = detail::FieldFromTag(name);
-
             // A multi-line value (repeated tag lines) becomes one field value per line.
-            std::size_t start = 0;
-            while (true)
+            const std::string field(psf::FieldFromTag(name));
+            const auto add_line = [&p_info, &field, utf8](std::string_view line)
             {
-                const std::size_t nl = value.find('\n', start);
-                const std::string line = value.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
-                p_info.meta_add(field.c_str(), detail::TagText(line, utf8));
-                if (nl == std::string::npos)
-                {
-                    break;
-                }
+                p_info.meta_add(field.c_str(), detail::TagText(std::string(line), utf8));
+            };
 
-                start = nl + 1;
-            }
+            psf::ForEachTagLine(value, add_line);
         }
+
         if (have_rg)
         {
             p_info.set_replaygain(rg);
@@ -404,7 +367,7 @@ public:
         psf::Tags tags = HiddenTags();
         for (t_size i = 0; i < p_info.meta_get_count(); i++)
         {
-            const std::string tag = detail::TagFromField(AsciiLower(p_info.meta_enum_name(i)));
+            const std::string tag(psf::TagFromField(AsciiLower(p_info.meta_enum_name(i))));
             if (tag.empty() || IsHiddenTag(tag) || tag.find('=') != std::string::npos)
             {
                 continue;
@@ -417,6 +380,7 @@ public:
                 {
                     value += '\n';
                 }
+
                 value += p_info.meta_enum_value(i, j);
             }
 
@@ -518,8 +482,7 @@ private:
     // silent if removing the tags dropped them.
     static bool IsHiddenTag(std::string_view name)
     {
-        return psf::IsSystemTag(name) || std::any_of(Traits::kPlaybackTags.begin(), Traits::kPlaybackTags.end(),
-                                                     [name](const char* tag) { return name == tag; });
+        return psf::IsHiddenTag(name, Traits::kPlaybackTags);
     }
 
     // The file's tags that IsHiddenTag names.
@@ -567,7 +530,7 @@ private:
     // The file's tagged length and fade, or the defaults. Playback uses these values.
     player::TrackLength GetLength() const
     {
-        return player::ResolveLength(psf::TagTimeMs(tags_, "length"), psf::TagTimeMs(tags_, "fade"), DefaultOptions());
+        return player::TagLength(tags_, DefaultOptions());
     }
 
     void WriteTags(const psf::Tags& tags, abort_callback& p_abort)

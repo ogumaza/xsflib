@@ -5,6 +5,7 @@
 // volume, and snapshots.
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -47,6 +48,7 @@ public:
 
     int start_failures_ = 0;
     int unloads_ = 0;
+    const TestSource* shared_with_ = nullptr; // the `previous` of the last SaveSource
 
 private:
     friend class xsflib::player::PlayerBase<TestPlayer, TestSet>;
@@ -153,8 +155,9 @@ private:
         return static_cast<uint64_t>(next_) * 10;
     }
 
-    std::shared_ptr<const TestSource> SaveSource(const TestSource*)
+    std::shared_ptr<const TestSource> SaveSource(const TestSource* previous)
     {
+        shared_with_ = previous;
         if (!started_)
         {
             return nullptr;
@@ -258,9 +261,9 @@ void TestFailures()
     // A step that throws stops the render with silence.
     set = Steps(10);
     set.throw_at_step = 2;
+    int16_t out[16];
 
     XSFLIB_CHECK(player.Load(set) && player.Start());
-    int16_t out[16];
     XSFLIB_CHECK(player.Render(out, 8) == 0 && out[0] == 0);
     XSFLIB_CHECK(player.GetState() == TestPlayer::State::kError && player.Error() == "the step failed: bad step");
 }
@@ -273,15 +276,16 @@ void TestBoot()
     TestPlayer player;
     TestSet set = Steps(4);
     set.boot_status = {kDriverBooting, kDriverBooting, kDriverBooting};
+    int16_t out[4];
 
     XSFLIB_CHECK(player.Load(set) && player.Start());
-    int16_t out[4];
     XSFLIB_CHECK(player.Render(out, 2) == 2 && out[0] == 10 && out[2] == 11);
 
-    // A sound that has finished by the end of the boot ends the wait too.
+    // A sound that has finished by the end of the boot ends the wait too. The render starts after the boot's step.
     set.boot_status = {kDriverBooting, xsflib::player::kDriverFinished};
 
     XSFLIB_CHECK(player.Load(set) && player.Start());
+    XSFLIB_CHECK(player.Render(out, 2) == 2 && out[0] == 4);
 
     // A driver error, with the step in the low byte.
     set.boot_status = {kDriverBooting, xsflib::player::kDriverFailed | 7};
@@ -306,17 +310,16 @@ void TestSnapshots()
 
     // A snapshot after 4 frames, with 2 frames of the second step waiting.
     int16_t out[8];
-    XSFLIB_CHECK(player.Render(out, 4) == 4);
-
+    const bool rendered = player.Render(out, 4) == 4;
     const std::shared_ptr<const TestPlayer::Snapshot> snapshot = player.Save();
 
-    XSFLIB_CHECK(snapshot && snapshot->pending.size() == 4 && snapshot->dropped == 8);
+    XSFLIB_CHECK(rendered && snapshot && snapshot->pending.size() == 4 && snapshot->dropped == 8);
 
     int16_t first[16];
-    XSFLIB_CHECK(player.Render(first, 8) == 8);
-
-    XSFLIB_CHECK(player.Restore(*snapshot));
     int16_t again[16];
+
+    XSFLIB_CHECK(player.Render(first, 8) == 8);
+    XSFLIB_CHECK(player.Restore(*snapshot));
     XSFLIB_CHECK(player.Render(again, 8) == 8);
     XSFLIB_CHECK(std::equal(first, first + 16, again) && again[0] == 5);
 
@@ -324,28 +327,38 @@ void TestSnapshots()
     XSFLIB_CHECK(player.Render(out, 4) == 4);
     XSFLIB_CHECK(player.GetState() == TestPlayer::State::kFinished && player.FinishedFrame() == 18);
 
+    // A later snapshot of the same run shares with the earlier one.
+    const auto same_run = player.Save(snapshot.get());
+
+    XSFLIB_CHECK(same_run && player.shared_with_ == snapshot->source.get());
+
     // Another player, or a later run, can't restore it.
     TestPlayer other;
+
     XSFLIB_CHECK(other.Load(Steps(6)) && other.Start());
-
     XSFLIB_CHECK(!other.Restore(*snapshot) && other.GetState() == TestPlayer::State::kPlaying);
-
     XSFLIB_CHECK(player.Start());
     XSFLIB_CHECK(!player.Restore(*snapshot));
 
     // A snapshot of another run or player isn't used to share with.
     const auto later = player.Save(snapshot.get());
-    XSFLIB_CHECK(later && later->run == 2);
+    const auto other_player = other.Save(snapshot.get());
+
+    XSFLIB_CHECK(later && later->run == 2 && player.shared_with_ == nullptr);
+    XSFLIB_CHECK(other_player && other.shared_with_ == nullptr);
 }
 
 } // namespace
 
 int main()
 {
-    TestLoadAndRender();
-    TestFailures();
-    TestBoot();
-    TestSnapshots();
+    const auto tests = []
+    {
+        TestLoadAndRender();
+        TestFailures();
+        TestBoot();
+        TestSnapshots();
+    };
 
-    return xsflib::testing::Summary("player base");
+    return xsflib::testing::RunTest("player base", tests);
 }

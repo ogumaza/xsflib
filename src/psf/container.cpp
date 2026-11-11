@@ -2,7 +2,6 @@
 
 // The PSF container, without zlib (see psf.h).
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -17,18 +16,24 @@
 
 #include "header.h"
 #include "xsflib/ascii.h"
+#include "xsflib/bytes.h"
 #include "xsflib/files.h"
 #include "xsflib/psf/psf.h"
+#include "xsflib/text.h"
 
 namespace xsflib::psf
 {
+namespace
+{
+
+// The marker at the start of the tag area.
+constexpr std::string_view kTagMarker = "[TAG]";
+
+} // namespace
 
 void Put32(std::vector<uint8_t>& v, uint32_t x)
 {
-    for (int i = 0; i < 4; i++)
-    {
-        v.push_back(static_cast<uint8_t>(x >> (8 * i)));
-    }
+    AppendLe32(v, x);
 }
 
 std::string Trim(const std::string& s)
@@ -105,32 +110,28 @@ std::optional<std::size_t> TagAreaOffset(const std::vector<uint8_t>& data)
         return std::nullopt;
     }
 
-    return static_cast<std::size_t>(16ull + header->reserved_size + header->program_size);
+    return static_cast<std::size_t>(uint64_t{detail::kHeaderSize} + header->reserved_size + header->program_size);
 }
 
 std::optional<std::string> ParsePsf(const std::vector<uint8_t>& data, PsfFile& out, const ParseOptions& options)
 {
-    const std::optional<detail::PsfHeader> header = detail::ReadPsfHeader(data);
-    if (!header)
+    std::optional<detail::PsfHeader> header;
+    const std::optional<std::string> header_error = detail::CheckPsfHeader(data, options, header);
+    if (header)
     {
-        return options.not_psf;
+        out.version = header->version;
     }
 
-    out.version = header->version;
-    if (options.version && out.version != *options.version)
+    if (header_error)
     {
-        return options.wrong_version;
+        return header_error;
     }
 
     const uint32_t reserved_size = header->reserved_size;
     const uint32_t program_size = header->program_size;
     const uint32_t crc = header->crc;
-    if (!header->complete)
-    {
-        return options.truncated;
-    }
-
-    out.reserved.assign(data.begin() + 16, data.begin() + 16 + reserved_size);
+    const auto reserved = data.begin() + detail::kHeaderSize;
+    out.reserved.assign(reserved, reserved + reserved_size);
     out.program.clear();
     out.tags.clear();
     out.compressed_size = program_size;
@@ -143,16 +144,18 @@ std::optional<std::string> ParsePsf(const std::vector<uint8_t>& data, PsfFile& o
         }
 
         if (std::optional<std::string> error =
-                options.decompress(data.data() + 16 + reserved_size, program_size, crc, out.program))
+                options.decompress(data.data() + detail::kHeaderSize + reserved_size, program_size, crc, out.program))
         {
             return error;
         }
     }
 
-    const std::size_t tag_start = 16ull + reserved_size + program_size;
-    if (data.size() >= tag_start + 5 && std::memcmp(data.data() + tag_start, "[TAG]", 5) == 0)
+    const std::size_t tag_start = detail::kHeaderSize + reserved_size + program_size;
+    if (data.size() >= tag_start + kTagMarker.size() &&
+        std::memcmp(data.data() + tag_start, kTagMarker.data(), kTagMarker.size()) == 0)
     {
-        out.tags = ParseTags(reinterpret_cast<const char*>(data.data() + tag_start + 5), data.size() - tag_start - 5);
+        const std::size_t text_start = tag_start + kTagMarker.size();
+        out.tags = ParseTags(reinterpret_cast<const char*>(data.data() + text_start), data.size() - text_start);
     }
 
     return std::nullopt;
@@ -165,21 +168,15 @@ std::string FormatTagArea(const Tags& tags)
         return {};
     }
 
-    std::string text = "[TAG]";
+    std::string text(kTagMarker);
     for (const auto& [k, v] : tags)
     {
-        std::size_t start = 0;
-        while (true)
+        const auto add_line = [&text, &name = k](std::string_view line)
         {
-            const std::size_t nl = v.find('\n', start);
-            text += k + "=" + v.substr(start, nl == std::string::npos ? std::string::npos : nl - start) + "\n";
-            if (nl == std::string::npos)
-            {
-                break;
-            }
+            text += name + "=" + std::string(line) + "\n";
+        };
 
-            start = nl + 1;
-        }
+        ForEachTagLine(v, add_line);
     }
 
     return text;
@@ -288,18 +285,13 @@ bool ReadWholeFile(const std::string& path, std::vector<uint8_t>& data)
     return ReadStream(f, data);
 }
 
-std::optional<Variables> ParseVariables(std::string_view text)
+std::optional<Variables> ParseVariables(std::string_view text, int max_variable)
 {
-    constexpr std::string_view kSeparators = ", \t\r\n";
-
     Variables variables;
-    std::size_t at = 0;
-    while ((at = text.find_first_not_of(kSeparators, at)) != std::string_view::npos)
+    for (const std::string_view item : SplitList(text))
     {
-        const std::size_t end = std::min(text.find_first_of(kSeparators, at), text.size());
-        const std::optional<Assignment> assignment = ParseAssignment(text.substr(at, end - at));
-        at = end;
-        if (!assignment || assignment->index < 0 || assignment->index > 31 || assignment->value < INT16_MIN ||
+        const std::optional<Assignment> assignment = ParseAssignment(item);
+        if (!assignment || assignment->index < 0 || assignment->index > max_variable || assignment->value < INT16_MIN ||
             assignment->value > INT16_MAX)
         {
             return std::nullopt;

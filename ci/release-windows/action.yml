@@ -3,8 +3,8 @@
 # The Windows job of a project's release workflow: build the release's targets, check that each program reports the
 # version and that each file contains it in the version resource that Windows shows in its properties, and upload the
 # files as an artifact for the packaging job. With foobar2000 set, the job first downloads the foobar2000 SDK
-# (../foobar2000-sdk). With xmplay set, it first downloads the XMPlay plugin SDK (../xmplay-sdk). The action runs on a
-# Windows runner, after the checkout:
+# (../foobar2000-sdk) and passes its folder to CMake. With xmplay set, it first downloads the XMPlay plugin SDK
+# (../xmplay-sdk) and passes its folder to CMake. The action runs on a Windows runner, after the checkout:
 # uses: ./externals/xsflib/ci/release-windows
 name: Release on Windows
 description: Build the release's Windows files, check their versions and upload them
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: "false"
   foobar2000-version:
-    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's default
+    description: The foobar2000 SDK's version, if the project pins one other than the SDK action's pin
     required: false
     default: ""
   foobar2000-sha256:
@@ -45,33 +45,33 @@ inputs:
     required: false
     default: "false"
   xmplay-sha256:
-    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's default
+    description: The SHA-256 of the XMPlay plugin SDK's archive, if the project pins one other than the SDK action's pin
     required: false
     default: ""
 runs:
   using: composite
   steps:
     - name: Download the foobar2000 SDK
-      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version == ''
-      uses: ./externals/xsflib/ci/foobar2000-sdk
-    - name: Download the project's foobar2000 SDK
-      if: inputs.foobar2000 == 'true' && inputs.foobar2000-version != ''
+      if: inputs.foobar2000 == 'true'
       uses: ./externals/xsflib/ci/foobar2000-sdk
       with:
         version: ${{ inputs.foobar2000-version }}
         sha256: ${{ inputs.foobar2000-sha256 }}
     - name: Download the XMPlay plugin SDK
-      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 == ''
-      uses: ./externals/xsflib/ci/xmplay-sdk
-    - name: Download the project's XMPlay plugin SDK
-      if: inputs.xmplay == 'true' && inputs.xmplay-sha256 != ''
+      if: inputs.xmplay == 'true'
       uses: ./externals/xsflib/ci/xmplay-sdk
       with:
         sha256: ${{ inputs.xmplay-sha256 }}
     - name: Build
       shell: pwsh
+      env:
+        FOOBAR2000: ${{ inputs.foobar2000 }}
+        XMPLAY: ${{ inputs.xmplay }}
       run: |
-        cmake -S . -B build ${{ inputs.cmake }}
+        $sdks = @()
+        if ($env:FOOBAR2000 -eq 'true') { $sdks += "-DFOOBAR2000_SDK_DIR=$env:GITHUB_WORKSPACE/sdk" }
+        if ($env:XMPLAY -eq 'true') { $sdks += '-DXMPLAY_SDK_DIR=xmp-sdk' }
+        cmake -S . -B build ${{ inputs.cmake }} $sdks
         cmake --build build --config Release --parallel --target ${{ inputs.targets }}
     # Each program reports the version. Windows shows it in the file's properties.
     - name: Check the version

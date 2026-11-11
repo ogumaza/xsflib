@@ -21,13 +21,13 @@
 #include <utility>
 #include <vector>
 
+#include "xsflib/ascii.h"
 #include "xsflib/files.h"
 #include "xsflib/rip/zip.h"
 #include "xsflib/sha1.h"
 
 namespace xsflib::rip
 {
-
 namespace
 {
 
@@ -35,12 +35,6 @@ namespace fs = std::filesystem;
 
 // A chip's identity: its size and SHA-1.
 using ChipKey = std::pair<uint64_t, std::string>;
-
-// An ASCII letter in lower case, and any other character as it is.
-char AsciiLower(char c)
-{
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
 
 // Whether `name` ends in `extension`, with ASCII letters in any case.
 bool EndsInExtension(std::string_view name, std::string_view extension)
@@ -56,6 +50,35 @@ bool EndsInExtension(std::string_view name, std::string_view extension)
         return AsciiLower(a) == AsciiLower(b);
     };
     return std::equal(end.begin(), end.end(), extension.begin(), extension.end(), same);
+}
+
+// The image of `game`, whose chips are all in `found`: each chip at its offset, with the bytes of each 16-bit word
+// swapped for a byte-swapped chip, and zeros between the chips.
+std::vector<uint8_t> AssembleImage(const RomSetGame& game, const std::map<ChipKey, const SetFile*>& found)
+{
+    uint32_t size = 0;
+    for (const RomChip& chip : game.chips)
+    {
+        size = std::max(size, chip.offset + chip.size);
+    }
+
+    std::vector<uint8_t> rom(size, 0);
+    for (const RomChip& chip : game.chips)
+    {
+        const std::vector<uint8_t>& data = found.at(ChipKey{chip.size, chip.sha1})->data;
+        uint8_t* out = rom.data() + chip.offset;
+        std::copy(data.begin(), data.end(), out);
+
+        if (chip.byte_swapped)
+        {
+            for (uint32_t i = 0; i + 1 < chip.size; i += 2)
+            {
+                std::swap(out[i], out[i + 1]);
+            }
+        }
+    }
+
+    return rom;
 }
 
 } // namespace
@@ -116,14 +139,31 @@ std::optional<std::string> ReadRomSet(const fs::path& path, const std::set<uint6
         {
             return "can't read " + Utf8(entry.path());
         }
+
         files.push_back(std::move(file));
     }
+
     if (error)
     {
         return "can't list " + Utf8(path) + ": " + error.message();
     }
 
     return std::nullopt;
+}
+
+std::optional<std::string> ReadRomSet(const fs::path& path, std::span<const RomSetGame> games, std::string_view program,
+                                      std::vector<SetFile>& files)
+{
+    std::set<uint64_t> sizes;
+    for (const RomSetGame& game : games)
+    {
+        for (const RomChip& chip : game.chips)
+        {
+            sizes.insert(chip.size);
+        }
+    }
+
+    return ReadRomSet(path, sizes, program, files);
 }
 
 RomSetImage BuildRomSetImage(std::span<const RomSetGame> games, const std::vector<SetFile>& files)
@@ -156,28 +196,9 @@ RomSetImage BuildRomSetImage(std::span<const RomSetGame> games, const std::vecto
 
         if (missing.empty())
         {
-            uint32_t size = 0;
-            for (const RomChip& chip : game.chips)
-            {
-                size = std::max(size, chip.offset + chip.size);
-            }
-
             result.game = index;
-            result.rom.assign(size, 0);
-            for (const RomChip& chip : game.chips)
-            {
-                const std::vector<uint8_t>& data = found.at(ChipKey{chip.size, chip.sha1})->data;
-                uint8_t* out = result.rom.data() + chip.offset;
-                std::copy(data.begin(), data.end(), out);
+            result.rom = AssembleImage(game, found);
 
-                if (chip.byte_swapped)
-                {
-                    for (uint32_t i = 0; i + 1 < chip.size; i += 2)
-                    {
-                        std::swap(out[i], out[i + 1]);
-                    }
-                }
-            }
             return result;
         }
 
@@ -191,6 +212,7 @@ RomSetImage BuildRomSetImage(std::span<const RomSetGame> games, const std::vecto
             {
                 result.problem += " " + std::to_string(chip->size) + " bytes with SHA-1 " + chip->sha1 + ";";
             }
+
             result.problem.pop_back();
         }
     }

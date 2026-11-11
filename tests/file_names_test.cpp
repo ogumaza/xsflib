@@ -19,6 +19,7 @@
 #include "xsflib/testing/temp_folder.h"
 
 using xsflib::rip::FileNames;
+namespace fs = std::filesystem;
 
 namespace
 {
@@ -96,7 +97,6 @@ void WriteBytes(const std::filesystem::path& path, const std::vector<uint8_t>& d
 // keeps the name. A file with other contents, of the same size or another, makes the library take the next name.
 void TestLibraryInFolder()
 {
-    namespace fs = std::filesystem;
     const xsflib::testing::TempFolder temp("xsflib_library_in_test");
     const fs::path& dir = temp.Path();
     const std::vector<uint8_t> kLibrary = {1, 2, 3, 4};
@@ -123,7 +123,6 @@ void TestLibraryInFolder()
 // second library. The files are larger than the block that the comparison reads. They differ only in their last byte.
 void TestLibrariesOfThreeRips()
 {
-    namespace fs = std::filesystem;
     const xsflib::testing::TempFolder temp("xsflib_three_libraries_test");
     const fs::path& dir = temp.Path();
     std::vector<std::vector<uint8_t>> libraries(3, std::vector<uint8_t>((std::size_t{1} << 20) + 5, 0x5a));
@@ -150,7 +149,6 @@ void TestLibrariesOfThreeRips()
 // Library and LibraryIn share the names. A library of one run then never replaces another library of the same run.
 void TestLibraryInTakenName()
 {
-    namespace fs = std::filesystem;
     const xsflib::testing::TempFolder temp("xsflib_library_in_taken_test");
     const fs::path& dir = temp.Path();
     const std::vector<uint8_t> kLibrary = {1, 2, 3, 4};
@@ -171,39 +169,58 @@ void TestLibraryInTakenName()
 // The output folder that a rip tool makes next to its input when -o isn't given.
 void TestDefaultOutputDir()
 {
-    namespace fs = std::filesystem;
     const xsflib::testing::TempFolder temp("xsflib_file_names_test");
     const fs::path& dir = temp.Path();
     fs::create_directories(dir / "Game");
 
-    const fs::path image = xsflib::rip::DefaultOutputDir((dir / "Game.iso").string(), "_xyz");
-    const fs::path folder = xsflib::rip::DefaultOutputDir((dir / "Game" / "").string(), "_xyz");
+    const fs::path image = xsflib::rip::DefaultOutputDir(xsflib::Utf8(dir / "Game.iso"), "_xyz");
+    const fs::path folder = xsflib::rip::DefaultOutputDir(xsflib::Utf8(dir / "Game" / ""), "_xyz");
 
     XSFLIB_CHECK(image == fs::absolute(dir / "Game_xyz").lexically_normal());
     XSFLIB_CHECK(folder == fs::absolute(dir / "Game_xyz").lexically_normal());
-    XSFLIB_CHECK(xsflib::rip::NameOfInput((dir / "Game").string()) == "Game");
+    XSFLIB_CHECK(xsflib::rip::NameOfInput(xsflib::Utf8(dir / "Game")) == "Game");
 }
 
 // The first bytes of an input: as many as asked for, fewer from a short file, and none from a folder or a missing file.
 void TestReadHead()
 {
-    namespace fs = std::filesystem;
     const xsflib::testing::TempFolder temp("xsflib_read_head_test");
     const fs::path& dir = temp.Path();
     std::ofstream(dir / "long.bin", std::ios::binary) << "YTAG\xff\xfe"
                                                          "0123456789";
     std::ofstream(dir / "short.bin", std::ios::binary) << "XTAG";
 
-    XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "long.bin").string()) ==
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir / "long.bin")) ==
                  "YTAG\xff\xfe"
                  "01");
-    XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "long.bin").string(), 4) == "YTAG");
-    XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "long.bin").string(), 0x104) ==
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir / "long.bin"), 4) == "YTAG");
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir / "long.bin"), 0x104) ==
                  "YTAG\xff\xfe"
                  "0123456789");
-    XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "short.bin").string()) == "XTAG");
-    XSFLIB_CHECK(xsflib::rip::ReadHead(dir.string()).empty());
-    XSFLIB_CHECK(xsflib::rip::ReadHead((dir / "missing.bin").string()).empty());
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir / "short.bin")) == "XTAG");
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir)).empty());
+    XSFLIB_CHECK(xsflib::rip::ReadHead(xsflib::Utf8(dir / "missing.bin")).empty());
+}
+
+// An input whose name isn't ASCII, given in UTF-8 as the tools take their arguments: its name, its output folder, its
+// first bytes and the folder of an archive below it keep the name. On Windows, this holds because the tools' manifest
+// makes UTF-8 their code page (xsflib_add_utf8_manifest).
+void TestUtf8Names()
+{
+    const std::string game = "\xe3\x82\xb2\xe3\x83\xbc\xe3\x83\xa0"; // three katakana in UTF-8
+    const xsflib::testing::TempFolder temp("xsflib_utf8_names_test");
+    const fs::path& dir = temp.Path();
+    fs::create_directories(dir / xsflib::PathFromUtf8(game));
+    std::ofstream(dir / xsflib::PathFromUtf8(game + ".bin"), std::ios::binary) << "ZTAG";
+
+    const std::string input = xsflib::Utf8(dir / xsflib::PathFromUtf8(game));
+    XSFLIB_CHECK(xsflib::rip::NameOfInput(input) == game);
+    XSFLIB_CHECK(xsflib::rip::InputPath(input) == fs::absolute(dir / xsflib::PathFromUtf8(game)).lexically_normal());
+    XSFLIB_CHECK(xsflib::rip::DefaultOutputDir(input, "_xyz") ==
+                 fs::absolute(dir / xsflib::PathFromUtf8(game + "_xyz")).lexically_normal());
+    XSFLIB_CHECK(xsflib::rip::ReadHead(input + ".bin", 4) == "ZTAG");
+    XSFLIB_CHECK((xsflib::rip::ArchiveFolders({game + "/sound.xyzar", "x/sound.xyzar"}) ==
+                  std::vector<std::string>{game + "_sound", "x_sound"}));
 }
 
 // Archives whose names clash, ignoring case, take the folders above them until they differ.
@@ -219,16 +236,20 @@ void TestArchiveFolders()
 
 int main()
 {
-    TestCharacters();
-    TestCharactersOutsideAscii();
-    TestDefaultOutputDir();
-    TestReadHead();
-    TestArchiveFolders();
-    TestReservedNames();
-    TestNamesDifferInMoreThanCase();
-    TestLibraryInFolder();
-    TestLibrariesOfThreeRips();
-    TestLibraryInTakenName();
+    const auto tests = []
+    {
+        TestCharacters();
+        TestCharactersOutsideAscii();
+        TestDefaultOutputDir();
+        TestReadHead();
+        TestArchiveFolders();
+        TestUtf8Names();
+        TestReservedNames();
+        TestNamesDifferInMoreThanCase();
+        TestLibraryInFolder();
+        TestLibrariesOfThreeRips();
+        TestLibraryInTakenName();
+    };
 
-    return xsflib::testing::Summary("file name");
+    return xsflib::testing::RunTest("file name", tests);
 }

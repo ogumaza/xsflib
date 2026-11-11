@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the PSF container (xsflib/psf/psf.h): times, decimal numbers, writing and parsing files, the parsing
-// options, tags and the variables tag.
+// options, tags, the tag helpers of the plugin templates (xsflib/psf/plugin_tags.h) and the variables tag.
 
 #include "xsflib/psf/psf.h"
 
 #include <algorithm>
+#include <array>
 #include <clocale>
 #include <cmath>
 #include <cstddef>
@@ -16,11 +17,13 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <zlib.h>
 
 #include "xsflib/bytes.h"
+#include "xsflib/psf/plugin_tags.h"
 #include "xsflib/testing/check.h"
 
 using namespace xsflib::psf;
@@ -143,7 +146,7 @@ void TestPsfRoundTrip()
     PsfFile psf;
     const auto err = ParsePsf(file, psf);
 
-    XSFLIB_CHECK(file.size() > 16 && std::memcmp(file.data(), "PSF", 3) == 0 && file[3] == 0x27);
+    XSFLIB_CHECK(file.size() > 16 && std::memcmp(file.data(), "PSF", 3) == 0 && file[3] == kVersion);
     XSFLIB_CHECK(!err);
     XSFLIB_CHECK(psf.version == kVersion);
     XSFLIB_CHECK(psf.reserved == reserved);
@@ -196,6 +199,38 @@ void TestTagParsing()
 
     XSFLIB_CHECK(!ParsePsf(data2, psf));
     XSFLIB_CHECK(psf.tags["comment"] == "a\nb");
+}
+
+// The tags that aren't metadata: the libraries, length, fade, volume and utf8.
+void TestSystemTags()
+{
+    XSFLIB_CHECK(IsSystemTag("_lib") && IsSystemTag("_lib2") && IsSystemTag("_lib10"));
+    XSFLIB_CHECK(IsSystemTag("length") && IsSystemTag("fade") && IsSystemTag("volume") && IsSystemTag("utf8"));
+    XSFLIB_CHECK(!IsSystemTag("title") && !IsSystemTag("game") && !IsSystemTag(""));
+}
+
+// The tag helpers of the plugin templates (xsflib/psf/plugin_tags.h), and the lines of a tag's value. A value that ends
+// in a line end has an empty last line.
+void TestPluginTags()
+{
+    const auto lines_of = [](std::string_view value)
+    {
+        std::vector<std::string> lines;
+        ForEachTagLine(value, [&lines](std::string_view line) { lines.emplace_back(line); });
+
+        return lines;
+    };
+
+    constexpr std::array kPlaybackTags = {"xyz_var"};
+
+    XSFLIB_CHECK(lines_of("a\nb\n") == std::vector<std::string>({"a", "b", ""}));
+    XSFLIB_CHECK(lines_of("") == std::vector<std::string>({""}));
+    XSFLIB_CHECK(FieldFromTag("game") == "album" && FieldFromTag("year") == "date");
+    XSFLIB_CHECK(FieldFromTag("artist") == "artist");
+    XSFLIB_CHECK(TagFromField("album") == "game" && TagFromField("date") == "year");
+    XSFLIB_CHECK(TagFromField("title") == "title");
+    XSFLIB_CHECK(IsHiddenTag("_lib2", kPlaybackTags) && IsHiddenTag("length", kPlaybackTags));
+    XSFLIB_CHECK(IsHiddenTag("xyz_var", kPlaybackTags) && !IsHiddenTag("title", kPlaybackTags));
 }
 
 void TestParseOptions()
@@ -288,6 +323,11 @@ void TestVariables()
         Check(!ParseVariables(bad), std::string("'") + bad + "' isn't read");
     }
 
+    // A format with track variables reads numbers up to its highest one.
+    XSFLIB_CHECK((ParseVariables("32=1, 47=-1", 47) == Variables{{32, 1}, {47, -1}}));
+    XSFLIB_CHECK(!ParseVariables("48=1", 47));
+    XSFLIB_CHECK(!ParseVariables("-1=1", 47));
+
     XSFLIB_CHECK(FormatVariables({{17, -1}, {0, 1}}) == "0=1, 17=-1");
     XSFLIB_CHECK(
         (ParseVariables(FormatVariables({{0, 1}, {16, -5}, {31, 300}})) == Variables{{0, 1}, {16, -5}, {31, 300}}));
@@ -297,13 +337,18 @@ void TestVariables()
 
 int main()
 {
-    TestTimes();
-    TestDecimals();
-    TestDecimalsUnderCommaLocale();
-    TestPsfRoundTrip();
-    TestTagParsing();
-    TestParseOptions();
-    TestVariables();
+    const auto tests = []
+    {
+        TestTimes();
+        TestDecimals();
+        TestDecimalsUnderCommaLocale();
+        TestPsfRoundTrip();
+        TestTagParsing();
+        TestSystemTags();
+        TestPluginTags();
+        TestParseOptions();
+        TestVariables();
+    };
 
-    return xsflib::testing::Summary("psf");
+    return xsflib::testing::RunTest("psf", tests);
 }

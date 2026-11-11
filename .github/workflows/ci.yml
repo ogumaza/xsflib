@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: MIT
 
-# Builds xsflib on its own whenever main changes: on Windows x64 with clang-cl, and on macOS ARM64. The Windows job
-# runs ctest too. The macOS job builds without the tests (XSFLIB_TESTS=OFF). Changes to documentation alone don't
-# start a run.
+# Builds xsflib on its own whenever main changes: on Windows x64 with clang-cl. The Windows job runs ctest too. Changes
+# to documentation alone don't start a run. Nor do changes to .clang-format, .gitignore or ci/ alone.
 name: CI
 
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    paths-ignore: ["**.md", "docs/**", "LICENSE", ".clang-format", ".gitignore", "ci/**"]
   workflow_dispatch:
 
 permissions:
@@ -25,16 +24,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
-      fail-fast: false
       matrix:
         include:
           - name: Windows x64 (clang-cl)
             os: windows-2025
             cmake: -A x64 -T ClangCL
-            tests: true
-          - name: macOS ARM64 (Apple Clang)
-            os: macos-15
-            cmake: -DXSFLIB_TESTS=OFF
     defaults:
       run:
         shell: bash
@@ -47,5 +41,4 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
-        if: matrix.tests
         run: ctest --test-dir build --build-config Release --output-on-failure --parallel 4

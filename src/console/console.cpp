@@ -9,6 +9,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <io.h>
 #include <windows.h>
 // shellapi.h, for CommandLineToArgvW, requires windows.h first.
 #include <shellapi.h>
@@ -79,6 +80,16 @@ void LineBufferOutput()
 #endif
 }
 
+#ifdef _WIN32
+void UnbufferRedirectedOutput()
+{
+    if (_isatty(_fileno(stdout)) == 0)
+    {
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+    }
+}
+#endif
+
 void UseUtf8Output(bool restore)
 {
 #ifdef _WIN32
@@ -103,9 +114,11 @@ void UseUtf8Output(bool restore)
 void WaitInOwnWindow(std::FILE* stream, const char* prompt)
 {
 #ifdef _WIN32
-    // A console that Explorer created for the tool has only the tool's process attached.
+    // A console that Explorer created for the tool has only the tool's process attached. Redirected input or output
+    // means that another program runs the tool. Nobody may then see the prompt or press Enter.
     DWORD processes[2];
-    if (GetConsoleProcessList(processes, 2) == 1)
+    const bool own_window = GetConsoleProcessList(processes, 2) == 1;
+    if (own_window && _isatty(_fileno(stdin)) != 0 && _isatty(_fileno(stdout)) != 0)
     {
         std::fputs(prompt, stream);
         std::fflush(stream);

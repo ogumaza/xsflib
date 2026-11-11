@@ -2,7 +2,7 @@
 
 // Unit tests for the encoding of a character in UTF-8 (AppendUtf8, xsflib/utf8.h): the examples of RFC 3629, the ends
 // of each length, and the values that UTF-8 can't hold. Every code point that it encodes decodes back with
-// Utf8Character.
+// Utf8Character. The test also checks IsUtf8 and PrintableName.
 
 #include "xsflib/utf8.h"
 
@@ -82,13 +82,28 @@ void TestRoundTrips()
     XSFLIB_CHECK(wrong == 0);
 }
 
+// Valid UTF-8, and the names that terminals and droplet apps get: a control character, a separator and an invalid
+// byte each become '?'.
+void TestValidityAndPrintableNames()
+{
+    XSFLIB_CHECK(xsflib::IsUtf8("") && xsflib::IsUtf8("a\xc3\xa9"));
+    XSFLIB_CHECK(!xsflib::IsUtf8("\xc3") && !xsflib::IsUtf8("a\x80"));
+    XSFLIB_CHECK(xsflib::PrintableName("a\xc3\xa9") == "a\xc3\xa9");
+    XSFLIB_CHECK(xsflib::PrintableName("a\tb\xe2\x80\xa9"
+                                       "c\x80") == "a?b?c?");
+}
+
 } // namespace
 
 int main()
 {
-    TestExamples();
-    TestAppends();
-    TestRoundTrips();
+    const auto tests = []
+    {
+        TestExamples();
+        TestAppends();
+        TestRoundTrips();
+        TestValidityAndPrintableNames();
+    };
 
-    return xsflib::testing::Summary("utf8");
+    return xsflib::testing::RunTest("utf8", tests);
 }

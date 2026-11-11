@@ -47,15 +47,16 @@ if (XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES OR XSFLIB_ZLIB)
     else()
         FetchContent_Declare(zlib
             GIT_REPOSITORY https://github.com/madler/zlib.git
-            GIT_TAG v1.3.1
+            GIT_TAG v1.4
             GIT_SHALLOW TRUE)
-        set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        FetchContent_MakeAvailable(zlib)
-        # Build only the static library. zlib's DLL would be built by default too. The DLL's resource script doesn't
+        # Build only the static library, without zlib's DLL, tests or install rules. The DLL's resource script doesn't
         # compile with clang-cl.
+        foreach (option ZLIB_BUILD_SHARED ZLIB_BUILD_TESTING ZLIB_INSTALL)
+            set(${option} OFF CACHE BOOL "" FORCE)
+        endforeach()
+        set(ZLIB_BUILD_STATIC ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(zlib)
         set_property(DIRECTORY ${zlib_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
-        target_include_directories(zlibstatic PUBLIC $<BUILD_INTERFACE:${zlib_SOURCE_DIR}>
-                                                     $<BUILD_INTERFACE:${zlib_BINARY_DIR}>)
         add_library(ZLIB::ZLIB ALIAS zlibstatic)
         list(APPEND XSFLIB_FETCHED_DEPENDENCIES zlib)
     endif()
@@ -87,6 +88,11 @@ if (XSFLIB_DISC_LIBRARIES OR XSFLIB_ZSTD)
         set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
         FetchContent_MakeAvailable(zstd)
         set_property(DIRECTORY ${zstd_SOURCE_DIR}/build/cmake PROPERTY EXCLUDE_FROM_ALL TRUE)
+        # clang-cl warns of unused functions in the sources of Zstandard 1.5.7. Like liblzma and bzip2, Zstandard is
+        # built without warnings.
+        if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(libzstd_static PRIVATE /w)
+        endif()
         # Only in the build: zstd's project installs the target. An installed target can't name the build folder.
         target_include_directories(libzstd_static INTERFACE $<BUILD_INTERFACE:${zstd_SOURCE_DIR}/lib>)
         xsflib_add_dependency(zstd libzstd_static)
@@ -105,7 +111,7 @@ if (XSFLIB_DISC_LIBRARIES)
     else()
         FetchContent_Declare(xz
             GIT_REPOSITORY https://github.com/tukaani-project/xz.git
-            GIT_TAG v5.8.1
+            GIT_TAG v5.8.4
             GIT_SHALLOW TRUE)
         foreach (option XZ_TOOL_XZ XZ_TOOL_XZDEC XZ_TOOL_LZMADEC XZ_TOOL_LZMAINFO XZ_TOOL_SCRIPTS XZ_DOC XZ_NLS
                         BUILD_TESTING)
@@ -113,8 +119,7 @@ if (XSFLIB_DISC_LIBRARIES)
         endforeach()
         FetchContent_MakeAvailable(xz)
         set_property(DIRECTORY ${xz_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
-        # xz turns on -Wall and many more warnings for Clang. clang-cl takes -Wall as -Weverything. liblzma is then
-        # built without warnings, as libFLAC is.
+        # xz turns on /W4 for clang-cl. liblzma is built without warnings, as libFLAC is.
         if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             target_compile_options(liblzma PRIVATE /w)
         endif()

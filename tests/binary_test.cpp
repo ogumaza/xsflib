@@ -5,7 +5,6 @@
 #include "xsflib/binary.h"
 
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -88,33 +87,25 @@ void TestBounds()
     const Reader plain(kData);
     const Reader cut(kData, false, ReaderOptions{BoundsMessage::kCutShort});
 
-    Check(ErrorOf([&] { plain.U32(4); }) == "read out of bounds at offset 4", "U32 past the end");
-    Check(ErrorOf([&] { plain.U8(6); }) == "read out of bounds at offset 6", "U8 at the end");
-    Check(ErrorOf([&] { plain.Sub(2, 5); }) == "read out of bounds at offset 2", "Sub past the end");
-    Check(ErrorOf([&] { plain.Magic(3, "ABCD"); }) == "read out of bounds at offset 3", "Magic past the end");
-    Check(ErrorOf([&] { cut.U16(5); }) == "the data ends before offset 5 (the file is cut short or damaged)",
-          "the cut-short wording");
+    Check(ErrorOf<FormatError>([&] { plain.U32(4); }) == "read out of bounds at offset 4", "U32 past the end");
+    Check(ErrorOf<FormatError>([&] { plain.U8(6); }) == "read out of bounds at offset 6", "U8 at the end");
+    Check(ErrorOf<FormatError>([&] { plain.Sub(2, 5); }) == "read out of bounds at offset 2", "Sub past the end");
+    Check(ErrorOf<FormatError>([&] { plain.Magic(3, "ABCD"); }) == "read out of bounds at offset 3",
+          "Magic past the end");
+    Check(
+        ErrorOf<FormatError>([&] { cut.U16(5); }) == "the data ends before offset 5 (the file is cut short or damaged)",
+        "the cut-short wording");
 
     const Reader past(kData, true, ReaderOptions{BoundsMessage::kRunsPastEnd});
-    Check(ErrorOf([&] { past.U32(3); }) == "a read at offset 3 runs past the end of the data", "the runs-past wording");
+    Check(ErrorOf<FormatError>([&] { past.U32(3); }) == "a read at offset 3 runs past the end of the data",
+          "the runs-past wording");
 
     const Reader fixed(kData, true, ReaderOptions{.bounds_message = BoundsMessage::kFixed, .fixed_message = "damaged"});
-    Check(ErrorOf([&] { fixed.U8(6); }) == "damaged", "a fixed message without the offset");
+    Check(ErrorOf<FormatError>([&] { fixed.U8(6); }) == "damaged", "a fixed message without the offset");
 
-    Check(ErrorOf([&] { plain.U16(4); }).empty(), "U16 that ends at the end");
+    Check(ErrorOf<FormatError>([&] { plain.U16(4); }).empty(), "U16 that ends at the end");
     Check(plain.Sub(2, 4).size() == 4 && plain.Sub(2, 4)[0] == 3, "Sub's bytes");
-
-    bool caught = false;
-    try
-    {
-        plain.S32(3);
-    }
-    catch (const std::runtime_error&)
-    {
-        caught = true;
-    }
-
-    XSFLIB_CHECK(caught);
+    Check(ErrorOf<FormatError>([&] { plain.S32(3); }) == "read out of bounds at offset 3", "S32 past the end");
 }
 
 void TestStringsAndMagic()
@@ -132,7 +123,7 @@ void TestStringsAndMagic()
     XSFLIB_CHECK(plain.CString(9, 64).empty());
     XSFLIB_CHECK(plain.CString(100, 64).empty());
     XSFLIB_CHECK(checked.CString(9, 64).empty());
-    Check(ErrorOf([&] { checked.CString(10, 64); }) == "read out of bounds at offset 10",
+    Check(ErrorOf<FormatError>([&] { checked.CString(10, 64); }) == "read out of bounds at offset 10",
           "CString past the end with check_string_offset");
 }
 
@@ -140,10 +131,13 @@ void TestStringsAndMagic()
 
 int main()
 {
-    TestLoadsAndStores();
-    TestByteOrders();
-    TestBounds();
-    TestStringsAndMagic();
+    const auto tests = []
+    {
+        TestLoadsAndStores();
+        TestByteOrders();
+        TestBounds();
+        TestStringsAndMagic();
+    };
 
-    return xsflib::testing::Summary("binary");
+    return xsflib::testing::RunTest("binary", tests);
 }

@@ -5,10 +5,13 @@
 // message names the descriptor by `name`, such as "process" or "archive". A descriptor's paths are written and read
 // with PutPath, PadTo4 and ReadPath (see streaming.h). The fields that every format's archive descriptor has are
 // written, read and checked with the templates at the end.
+// The archive descriptors of some formats also list the volumes that a game gives the tracks of sounds as they start
+// (SoundTrackVolumes).
 
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -138,5 +141,35 @@ std::optional<std::string> CheckArchiveStart(const Descriptor& d, uint32_t max_v
 
     return std::nullopt;
 }
+
+// The volumes that the game code sets for the 16 tracks of a sound through the sound handle as the sound starts, track
+// 0 first, such as nw::snd's SetTrackVolume. 1 leaves a track as the sequence plays it.
+struct SoundTrackVolumes
+{
+    static constexpr std::size_t kTracks = 16;
+
+    bool operator==(const SoundTrackVolumes&) const = default;
+
+    uint32_t sound = 0; // the item ID of the sound in its archive
+    std::array<float, kTracks> volumes{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                                       1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+};
+
+// The bytes of each sound in the list of track volumes of a descriptor: the item ID of the sound, then its 16 volumes,
+// each a 32-bit little-endian word.
+inline constexpr std::size_t kSoundTrackVolumesBytes = 4 + 4 * SoundTrackVolumes::kTracks;
+
+// Writes a list of track volumes: the count of the sounds (32 bits), then each sound.
+void PutTrackVolumes(std::vector<uint8_t>& v, const std::vector<SoundTrackVolumes>& sounds);
+
+// Reads a list of track volumes at `pos` into `sounds`, and moves `pos` past it. False if `data` ends first.
+bool ReadTrackVolumes(const std::vector<uint8_t>& data, std::size_t& pos, std::vector<SoundTrackVolumes>& sounds);
+
+// Why a player can't play a list of track volumes, or nothing. The list gives each sound once, and each volume is a
+// finite number of 0 or more. The messages name the archive descriptor.
+std::optional<std::string> CheckTrackVolumes(const std::vector<SoundTrackVolumes>& sounds);
+
+// The track volumes that `sounds` gives `sound`, an item ID, or null.
+const SoundTrackVolumes* FindTrackVolumes(const std::vector<SoundTrackVolumes>& sounds, uint32_t sound);
 
 } // namespace xsflib::psf

@@ -96,14 +96,14 @@ struct FakeTraits
         return std::nullopt;
     }
 
+    // Loads the archive, then checks the group file. A load that fails leaves its archive in `archive`.
     static std::optional<std::string> LoadArchive(Set& set, const Prepared&, std::optional<Archive>& archive)
     {
+        archive.emplace(static_cast<int>(set.files["archive"].size()));
         if (set.files.count("group") && set.files["group"].empty())
         {
             return std::string("the set has no file group");
         }
-
-        archive.emplace(static_cast<int>(set.files["archive"].size()));
 
         return std::nullopt;
     }
@@ -278,10 +278,12 @@ void TestKeptArchive()
         XSFLIB_CHECK(source.Busy());
     }
 
-    // One load. Each model went before the archive it played.
-    XSFLIB_CHECK(g_log == std::vector<std::string>({"load archive", "make model", "start sound 2",
-                                                    "model gone, archive of 3 frames", "make model", "start sound 2",
-                                                    "model gone, archive of 3 frames", "archive gone"}));
+    // The archive of the failed load went at once. Both later starts used one load. Each model went before the archive
+    // it played.
+    XSFLIB_CHECK(g_log ==
+                 std::vector<std::string>({"load archive", "archive gone", "load archive", "make model",
+                                           "start sound 2", "model gone, archive of 3 frames", "make model",
+                                           "start sound 2", "model gone, archive of 3 frames", "archive gone"}));
 }
 
 void TestSnapshotsAndReloads()
@@ -327,9 +329,12 @@ void TestSnapshotsAndReloads()
 
 int main()
 {
-    TestErrors();
-    TestKeptArchive();
-    TestSnapshotsAndReloads();
+    const auto tests = []
+    {
+        TestErrors();
+        TestKeptArchive();
+        TestSnapshotsAndReloads();
+    };
 
-    return xsflib::testing::Summary("archive source");
+    return xsflib::testing::RunTest("archive source", tests);
 }

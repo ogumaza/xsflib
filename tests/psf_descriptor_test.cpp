@@ -2,9 +2,11 @@
 
 // Tests of the descriptors' checks: each message, word for word, and the order of the header's checks. And the fields
 // that every archive descriptor has, written, read and checked for a made-up format.
+// The test also checks the lists of track volumes.
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,6 +24,7 @@ using xsflib::psf::CheckDescriptorHeader;
 using xsflib::psf::CheckDescriptorOutputMode;
 using xsflib::psf::CheckDescriptorVersion;
 using xsflib::psf::kDescriptorFlagDspRequired;
+using xsflib::psf::SoundTrackVolumes;
 
 void Expect(const std::optional<std::string>& got, const std::optional<std::string>& want, const std::string& what)
 {
@@ -120,36 +123,112 @@ void TestArchiveFields()
     Expect(CheckArchiveStart(flagged, 96), "the archive descriptor's flags are 0x1; version 1 has none", "no flags");
 }
 
+// A list of track volumes: written, read back, found by sound and checked.
+void TestTrackVolumes()
+{
+    SoundTrackVolumes first;
+    first.sound = 0x0100030b;
+    first.volumes[1] = 0.0f;
+    first.volumes[15] = 0.25f;
+    SoundTrackVolumes second;
+    second.sound = 0x01000007;
+    second.volumes.fill(0.0f);
+    second.volumes[3] = 2.0f;
+    const std::vector<SoundTrackVolumes> sounds = {first, second};
+
+    // The count, then the item ID and the volumes of each sound. Reading stops at the end of the list.
+    std::vector<uint8_t> v = {0xaa};
+    xsflib::psf::PutTrackVolumes(v, sounds);
+    v.push_back(0xbb);
+    XSFLIB_CHECK(v.size() == 1 + 4 + 2 * xsflib::psf::kSoundTrackVolumesBytes + 1 &&
+                 xsflib::psf::kSoundTrackVolumesBytes == 68);
+    XSFLIB_CHECK(v[1] == 2 && v[2] == 0 && v[5] == 0x0b && v[6] == 0x03 && v[7] == 0x00 && v[8] == 0x01);
+    XSFLIB_CHECK(v[9] == 0x00 && v[10] == 0x00 && v[11] == 0x80 && v[12] == 0x3f); // 1.0f
+
+    std::size_t pos = 1;
+    std::vector<SoundTrackVolumes> back;
+    XSFLIB_CHECK(xsflib::psf::ReadTrackVolumes(v, pos, back) && back == sounds && pos == v.size() - 1);
+
+    // A list cut short, a count larger than the bytes allow, and a position past the end.
+    std::vector<SoundTrackVolumes> none;
+    std::size_t at = 1;
+    XSFLIB_CHECK(!xsflib::psf::ReadTrackVolumes(std::vector<uint8_t>(v.begin(), v.end() - 2), at, none));
+    std::vector<uint8_t> large = v;
+    large[1] = 3;
+    at = 1;
+    XSFLIB_CHECK(!xsflib::psf::ReadTrackVolumes(large, at, none) && none.empty());
+    at = v.size() + 1;
+    XSFLIB_CHECK(!xsflib::psf::ReadTrackVolumes(v, at, none));
+
+    // An empty list is its count alone.
+    std::vector<uint8_t> empty;
+    xsflib::psf::PutTrackVolumes(empty, {});
+    at = 0;
+    XSFLIB_CHECK(empty == std::vector<uint8_t>(4, 0) && xsflib::psf::ReadTrackVolumes(empty, at, none) &&
+                 none.empty() && at == 4);
+
+    const SoundTrackVolumes* found = xsflib::psf::FindTrackVolumes(sounds, 0x01000007);
+    XSFLIB_CHECK(found == &sounds[1] && !xsflib::psf::FindTrackVolumes(sounds, 0x01000008) &&
+                 !xsflib::psf::FindTrackVolumes({}, 0x0100030b));
+
+    // Each sound once, and each volume finite and 0 or more.
+    std::vector<SoundTrackVolumes> twice = sounds;
+    twice[1].sound = first.sound;
+    std::vector<SoundTrackVolumes> negative = sounds;
+    negative[0].volumes[2] = -0.5f;
+    std::vector<SoundTrackVolumes> nan = sounds;
+    nan[1].volumes[0] = std::numeric_limits<float>::quiet_NaN();
+    std::vector<SoundTrackVolumes> infinite = sounds;
+    infinite[1].volumes[5] = std::numeric_limits<float>::infinity();
+
+    Expect(xsflib::psf::CheckTrackVolumes(sounds), std::nullopt, "good track volumes");
+    Expect(xsflib::psf::CheckTrackVolumes({}), std::nullopt, "no track volumes");
+    Expect(xsflib::psf::CheckTrackVolumes(twice),
+           "the archive descriptor lists the track volumes of sound 0x0100030b more than once", "a sound twice");
+    Expect(xsflib::psf::CheckTrackVolumes(negative),
+           "a track volume of sound 0x0100030b in the archive descriptor isn't a finite number of 0 or more",
+           "a negative volume");
+    Expect(xsflib::psf::CheckTrackVolumes(nan),
+           "a track volume of sound 0x01000007 in the archive descriptor isn't a finite number of 0 or more", "NaN");
+    Expect(xsflib::psf::CheckTrackVolumes(infinite),
+           "a track volume of sound 0x01000007 in the archive descriptor isn't a finite number of 0 or more",
+           "infinity");
+}
+
 } // namespace
 
 int main()
 {
-    Expect(CheckDescriptorVersion("process", 1, 1), std::nullopt, "version 1");
-    Expect(CheckDescriptorVersion("archive", 2, 1), "archive descriptor version 2; this player supports version 1",
-           "version 2");
+    const auto tests = []
+    {
+        Expect(CheckDescriptorVersion("process", 1, 1), std::nullopt, "version 1");
+        Expect(CheckDescriptorVersion("archive", 2, 1), "archive descriptor version 2; this player supports version 1",
+               "version 2");
 
-    Expect(CheckDescriptorFlags("archive", 0, 0), std::nullopt, "no flags");
-    Expect(CheckDescriptorFlags("process", 4, 0), "the process descriptor's flags are 0x4; version 1 has none",
-           "a flag where none is allowed");
-    Expect(CheckDescriptorFlags("archive", 1, kDescriptorFlagDspRequired), std::nullopt, "DSP required");
-    Expect(CheckDescriptorFlags("archive", 0, kDescriptorFlagDspRequired),
-           "the archive descriptor's flags are 0x0; version 1 requires only bit 0 (DSP required) to be set",
-           "DSP required missing");
+        Expect(CheckDescriptorFlags("archive", 0, 0), std::nullopt, "no flags");
+        Expect(CheckDescriptorFlags("process", 4, 0), "the process descriptor's flags are 0x4; version 1 has none",
+               "a flag where none is allowed");
+        Expect(CheckDescriptorFlags("archive", 1, kDescriptorFlagDspRequired), std::nullopt, "DSP required");
+        Expect(CheckDescriptorFlags("archive", 0, kDescriptorFlagDspRequired),
+               "the archive descriptor's flags are 0x0; version 1 requires only bit 0 (DSP required) to be set",
+               "DSP required missing");
 
-    Expect(CheckDescriptorOutputMode("archive", 1), std::nullopt, "stereo");
-    Expect(CheckDescriptorOutputMode("archive", 2),
-           "the archive descriptor's output mode is 2; version 1 supports only stereo (1)", "another output mode");
+        Expect(CheckDescriptorOutputMode("archive", 1), std::nullopt, "stereo");
+        Expect(CheckDescriptorOutputMode("archive", 2),
+               "the archive descriptor's output mode is 2; version 1 supports only stereo (1)", "another output mode");
 
-    // CheckDescriptorHeader checks the version first, then the flags, then the output mode.
-    Expect(CheckDescriptorHeader("archive", 1, 0, 1, 0), std::nullopt, "a good header");
-    Expect(CheckDescriptorHeader("archive", 3, 7, 5, 0), "archive descriptor version 3; this player supports version 1",
-           "the version first");
-    Expect(CheckDescriptorHeader("archive", 1, 7, 5, 0), "the archive descriptor's flags are 0x7; version 1 has none",
-           "the flags next");
-    Expect(CheckDescriptorHeader("process", 1, 1, 5, kDescriptorFlagDspRequired),
-           "the process descriptor's output mode is 5; version 1 supports only stereo (1)", "the output mode last");
+        // CheckDescriptorHeader checks the version first, then the flags, then the output mode.
+        Expect(CheckDescriptorHeader("archive", 1, 0, 1, 0), std::nullopt, "a good header");
+        Expect(CheckDescriptorHeader("archive", 3, 7, 5, 0),
+               "archive descriptor version 3; this player supports version 1", "the version first");
+        Expect(CheckDescriptorHeader("archive", 1, 7, 5, 0),
+               "the archive descriptor's flags are 0x7; version 1 has none", "the flags next");
+        Expect(CheckDescriptorHeader("process", 1, 1, 5, kDescriptorFlagDspRequired),
+               "the process descriptor's output mode is 5; version 1 supports only stereo (1)", "the output mode last");
 
-    TestArchiveFields();
+        TestArchiveFields();
+        TestTrackVolumes();
+    };
 
-    return xsflib::testing::Summary("psf descriptor");
+    return xsflib::testing::RunTest("psf descriptor", tests);
 }

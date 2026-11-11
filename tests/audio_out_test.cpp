@@ -4,6 +4,8 @@
 // after a 44-byte header. A FLAC file must decode to the same samples at the same rate. The extension must pick the
 // format in any case. A file that can't be written must be reported. A length that a WAV file can't hold must be
 // rejected before anything is rendered.
+// The test reads the FLAC files with the FLAC reader of the tests (xsflib/testing/flac.h). The reader must refuse a
+// file that isn't 16-bit stereo FLAC at the rate, a damaged one and a missing one.
 //
 // usage: xsflib_audio_out_test
 
@@ -11,17 +13,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
-#include <fstream>
-#include <ios>
-#include <iterator>
 #include <string>
 #include <vector>
 
-#include <FLAC/stream_decoder.h>
-
 #include "xsflib/bytes.h"
+#include "xsflib/files.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/flac.h"
 #include "xsflib/testing/temp_folder.h"
 
 using xsflib::testing::Check;
@@ -51,16 +51,11 @@ std::vector<int16_t> Signal()
     return pcm;
 }
 
-std::vector<uint8_t> ReadFile(const fs::path& path)
-{
-    std::ifstream in(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
 void CheckWav(const fs::path& path, const std::vector<int16_t>& pcm)
 {
-    const std::vector<uint8_t> file = ReadFile(path);
-    if (!Check(file.size() == 44 + 2 * pcm.size(), "the WAV file holds a 44-byte header and the samples"))
+    std::vector<uint8_t> file;
+    const bool read = xsflib::ReadFile(path, file);
+    if (!Check(read && file.size() == 44 + 2 * pcm.size(), "the WAV file holds a 44-byte header and the samples"))
     {
         return;
     }
@@ -81,93 +76,83 @@ void CheckWav(const fs::path& path, const std::vector<int16_t>& pcm)
     XSFLIB_CHECK(same);
 }
 
-// What the decoder found: the stream's format and its samples, interleaved.
-struct Decoded
-{
-    uint32_t rate = 0;
-    uint32_t channels = 0;
-    uint32_t bits = 0;
-    std::vector<int16_t> pcm;
-    bool error = false;
-};
-
-FLAC__StreamDecoderWriteStatus OnWrite(const FLAC__StreamDecoder*, const FLAC__Frame* frame,
-                                       const FLAC__int32* const buffer[], void* data)
-{
-    auto& d = *static_cast<Decoded*>(data);
-    for (uint32_t i = 0; i < frame->header.blocksize; i++)
-    {
-        for (uint32_t c = 0; c < frame->header.channels; c++)
-        {
-            d.pcm.push_back(static_cast<int16_t>(buffer[c][i]));
-        }
-    }
-
-    return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
-}
-
-void OnMetadata(const FLAC__StreamDecoder*, const FLAC__StreamMetadata* metadata, void* data)
-{
-    auto& d = *static_cast<Decoded*>(data);
-    if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO)
-    {
-        d.rate = metadata->data.stream_info.sample_rate;
-        d.channels = metadata->data.stream_info.channels;
-        d.bits = metadata->data.stream_info.bits_per_sample;
-    }
-}
-
-void OnError(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus, void* data)
-{
-    static_cast<Decoded*>(data)->error = true;
-}
-
 void CheckFlac(const fs::path& path, const std::vector<int16_t>& pcm)
 {
-    Decoded d;
-    FLAC__StreamDecoder* decoder = FLAC__stream_decoder_new();
-    if (!Check(decoder != nullptr, "the FLAC decoder starts"))
+    std::vector<int16_t> decoded;
+    try
     {
+        decoded = xsflib::testing::ReadFlac(path, kRate);
+    }
+    catch (const std::exception& e)
+    {
+        Check(false, e.what());
         return;
     }
 
-    FLAC__stream_decoder_set_md5_checking(decoder, true);
-    const bool opened = FLAC__stream_decoder_init_file(decoder, path.string().c_str(), OnWrite, OnMetadata, OnError,
-                                                       &d) == FLAC__STREAM_DECODER_INIT_STATUS_OK;
-    const bool decoded = opened && FLAC__stream_decoder_process_until_end_of_stream(decoder);
-    const bool md5_matches = decoded && FLAC__stream_decoder_finish(decoder);
-    FLAC__stream_decoder_delete(decoder);
-
-    Check(decoded && !d.error, "the FLAC file decodes");
-    Check(md5_matches, "the FLAC file's samples match its MD5 signature");
-    XSFLIB_CHECK(d.rate == kRate && d.channels == 2 && d.bits == 16);
-    Check(d.pcm == pcm, "the FLAC file decodes to the samples written");
+    Check(decoded == pcm, "the FLAC file decodes to the samples written");
 }
 
-} // namespace
+// ReadFlac refuses a file that isn't FLAC, a FLAC file at another rate and a file that isn't there.
+void CheckFlacRefusals(const fs::path& flac, const fs::path& wav)
+{
+    const auto refused = [](const fs::path& path, uint32_t rate, const std::string& message)
+    {
+        try
+        {
+            xsflib::testing::ReadFlac(path, rate);
+        }
+        catch (const std::exception& e)
+        {
+            return std::string(e.what()) == message;
+        }
 
-int main()
+        return false;
+    };
+
+    Check(refused(wav, kRate, "can't decode " + xsflib::Utf8(wav)), "a WAV file isn't decoded as FLAC");
+    Check(refused(flac, kRate + 1, "can't decode " + xsflib::Utf8(flac)), "a FLAC file at another rate is refused");
+    const fs::path missing = flac.parent_path() / "none.flac";
+    Check(refused(missing, kRate, "can't read " + xsflib::Utf8(missing)), "a missing file is reported");
+
+    std::vector<uint8_t> bytes;
+    XSFLIB_CHECK(xsflib::ReadFile(flac, bytes));
+    bytes[bytes.size() - 1] ^= 0xff;
+    bool corrupt = false;
+    try
+    {
+        xsflib::testing::DecodeFlac(bytes, kRate, "corrupt");
+    }
+    catch (const std::exception& e)
+    {
+        corrupt = std::string(e.what()) == "can't decode corrupt";
+    }
+    Check(corrupt, "a FLAC stream whose last frame is damaged is refused");
+}
+
+// The paths go to the writer as UTF-8.
+void TestWriteAudio()
 {
     const xsflib::testing::TempFolder temp("xsflib_audio_out_test");
     const fs::path& dir = temp.Path();
 
     const std::vector<int16_t> pcm = Signal();
 
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "out.wav").string(), pcm, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "out.wav"), pcm, kRate));
     CheckWav(dir / "out.wav", pcm);
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "out.flac").string(), pcm, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "out.flac"), pcm, kRate));
     CheckFlac(dir / "out.flac", pcm);
+    CheckFlacRefusals(dir / "out.flac", dir / "out.wav");
 
     // The extension picks the format in any case. Anything but .flac is WAV.
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "upper.FLAC").string(), pcm, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "upper.FLAC"), pcm, kRate));
     CheckFlac(dir / "upper.FLAC", pcm);
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "other.raw").string(), pcm, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "other.raw"), pcm, kRate));
     CheckWav(dir / "other.raw", pcm);
 
     // No samples make a valid file of each kind.
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "empty.wav").string(), {}, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "empty.wav"), {}, kRate));
     CheckWav(dir / "empty.wav", {});
-    XSFLIB_CHECK(!xsflib::cli::WriteAudio((dir / "empty.flac").string(), {}, kRate));
+    XSFLIB_CHECK(!xsflib::cli::WriteAudio(xsflib::Utf8(dir / "empty.flac"), {}, kRate));
     CheckFlac(dir / "empty.flac", {});
 
     // A WAV file's sizes are 32-bit. The audio can take up to 2^32 - 37 bytes, 1,073,741,814 frames. FLAC has no such
@@ -177,8 +162,13 @@ int main()
     XSFLIB_CHECK(!xsflib::cli::CheckAudioLength("out.FLAC", 1'073'741'815));
 
     // A file in a folder that doesn't exist can't be written.
-    XSFLIB_CHECK(xsflib::cli::WriteAudio((dir / "missing" / "out.wav").string(), pcm, kRate).has_value());
-    XSFLIB_CHECK(xsflib::cli::WriteAudio((dir / "missing" / "out.flac").string(), pcm, kRate).has_value());
+    XSFLIB_CHECK(xsflib::cli::WriteAudio(xsflib::Utf8(dir / "missing" / "out.wav"), pcm, kRate).has_value());
+    XSFLIB_CHECK(xsflib::cli::WriteAudio(xsflib::Utf8(dir / "missing" / "out.flac"), pcm, kRate).has_value());
+}
 
-    return xsflib::testing::Summary("audio out");
+} // namespace
+
+int main()
+{
+    return xsflib::testing::RunTest("audio out", TestWriteAudio);
 }

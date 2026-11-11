@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,11 +38,8 @@ void ProgramBuilder::AddMemory(uint32_t address, const void* data, std::size_t s
 
 void ProgramBuilder::AddFile(const std::string& path, const std::vector<uint8_t>& data)
 {
-    std::vector<uint8_t> payload;
-    PutPath(payload, path);
-    PadTo4(payload);
-    payload.insert(payload.end(), data.begin(), data.end());
-    Chunk("FILE", payload);
+    const std::vector<uint8_t> chunk = detail::FileChunkBytes(path, data);
+    program_.insert(program_.end(), chunk.begin(), chunk.end());
 }
 
 void ProgramBuilder::AddSound(uint32_t sound_id)
@@ -54,18 +50,8 @@ void ProgramBuilder::AddSound(uint32_t sound_id)
 
 void ProgramBuilder::AddSounds(std::span<const uint32_t> sound_ids)
 {
-    if (sound_ids.empty())
-    {
-        throw std::invalid_argument("a SND chunk selects at least one sound");
-    }
-
-    std::vector<uint8_t> payload;
-    for (const uint32_t sound_id : sound_ids)
-    {
-        Put32(payload, sound_id);
-    }
-
-    Chunk("SND ", payload);
+    const std::vector<uint8_t> chunk = detail::SoundChunkBytes(sound_ids);
+    program_.insert(program_.end(), chunk.begin(), chunk.end());
 }
 
 std::optional<std::string> ParseProgram(const std::vector<uint8_t>& program, ProgramChunks& out,

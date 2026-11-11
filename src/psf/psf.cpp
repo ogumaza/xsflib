@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // zlib's part of the PSF container (see psf.h): the default decompressor, and the writer. Both use code that the
-// streaming program shares (streaming.cpp): the inflater and the writer of a PSF file in pieces.
+// streaming program shares (streaming.cpp): the check of the CRC, the inflater and the writer of a PSF file in pieces.
 
 #include "xsflib/psf/psf.h"
 
@@ -12,8 +12,6 @@
 #include <string>
 #include <vector>
 
-#include <zlib.h>
-
 #include "inflate.h"
 #include "xsflib/psf/streaming.h"
 
@@ -23,9 +21,9 @@ namespace xsflib::psf
 std::optional<std::string> InflateProgram(const uint8_t* data, std::size_t size, uint32_t crc,
                                           std::vector<uint8_t>& program)
 {
-    if (crc32(0, data, static_cast<uInt>(size)) != crc)
+    if (std::optional<std::string> error = detail::CheckProgramCrc(data, size, crc))
     {
-        return "program CRC mismatch";
+        return error;
     }
 
     return detail::InflateWhole(data, static_cast<uint32_t>(size), program);

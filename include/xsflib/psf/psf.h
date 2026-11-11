@@ -90,6 +90,25 @@ std::optional<std::size_t> TagAreaOffset(const std::vector<uint8_t>& data);
 // all with the same name. Empty when there are no tags.
 std::string FormatTagArea(const Tags& tags);
 
+// Calls `f` with each line of a tag's value: the text before each '\n', and the text after the last. A tag area has a
+// line for each of them (FormatTagArea).
+template <typename F>
+void ForEachTagLine(std::string_view value, const F& f)
+{
+    std::size_t start = 0;
+    while (true)
+    {
+        const std::size_t nl = value.find('\n', start);
+        f(value.substr(start, nl == std::string_view::npos ? std::string_view::npos : nl - start));
+        if (nl == std::string_view::npos)
+        {
+            break;
+        }
+
+        start = nl + 1;
+    }
+}
+
 // Parses the text of a tag area after "[TAG]": name=value lines. Lines without '=' or without a name are skipped. A
 // name on consecutive lines makes a multi-line value.
 Tags ParseTags(const char* text, std::size_t size);
@@ -126,10 +145,10 @@ bool IsSystemTag(std::string_view name);
 using Variables = std::map<int, int16_t>;
 
 // Parses a variables tag: one or more assignments "N=V", separated by commas or white space, line breaks included. N is
-// 0 to 31 and V -32768 to 32767, each in decimal or in hex with a 0x prefix. Either may have a minus sign. A later
-// assignment to the same variable wins. Returns nullopt if any part is malformed or out of range, or if there's no
-// assignment.
-std::optional<Variables> ParseVariables(std::string_view text);
+// 0 to `max_variable` and V -32768 to 32767, each in decimal or in hex with a 0x prefix. Either may have a minus sign.
+// A later assignment to the same variable wins. Returns nullopt if any part is malformed or out of range, or if there's
+// no assignment. A format with more variables, such as track variables, passes its highest number.
+std::optional<Variables> ParseVariables(std::string_view text, int max_variable = 31);
 
 // The variables tag for `variables`: the assignments in increasing order of N, in decimal, separated by ", ".
 std::string FormatVariables(const Variables& variables);

@@ -16,9 +16,13 @@
 //                             straight into its chunks, after the file's _lib. Such a format has no MEM chunks and no
 //                             driver block. Every set of the format selects a sound. Without kStreaming, a format
 //                             copies.
+//
+// The loader walks the set's files with WalkSet. A loader of another kind can walk a set with it too: WalkSet takes a
+// callback that parses each file and one that adds it to the set.
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -110,6 +114,135 @@ struct LoadedSet
     std::vector<std::string> sources; // files loaded, in order (for diagnostics)
 };
 
+// The limits of a walk over a set's files (WalkSet), and the errors of a set past them.
+struct WalkRules
+{
+    // The error for a file more than kMaxLibDepth library tags down from the first file.
+    std::string too_deep = "_lib nesting too deep";
+
+    // The error for a set of more than kMaxSetFiles files.
+    std::string too_many = "more than " + std::to_string(kMaxSetFiles) + " files in the set";
+
+    // Whether a file counts toward kMaxSetFiles as soon as the walk reaches it. Otherwise a file counts once it's
+    // added. A file whose _lib is still loading then doesn't count yet.
+    bool count_reached = false;
+};
+
+namespace detail
+{
+
+// What a walk over a set's files uses at every level (see WalkSet).
+template <typename Parse, typename Add>
+struct SetWalk
+{
+    const FileReader& reader;
+    std::string_view separators;
+    const Parse& parse;
+    const Add& add;
+    const WalkRules& rules;
+    std::size_t files = 0; // the files that count toward kMaxSetFiles so far
+};
+
+// Walks the file at `path`, `depth` library tags down from the first file, into `file` (see WalkSet).
+template <typename File, typename Parse, typename Add>
+std::optional<std::string> WalkFile(const std::string& path, int depth, File& file, SetWalk<Parse, Add>& walk)
+{
+    if (depth > kMaxLibDepth)
+    {
+        return walk.rules.too_deep;
+    }
+
+    if (walk.files >= kMaxSetFiles)
+    {
+        return walk.rules.too_many;
+    }
+
+    if (walk.rules.count_reached)
+    {
+        walk.files++;
+    }
+
+    std::vector<uint8_t> data;
+    if (!walk.reader(path, data))
+    {
+        return "can't read " + path;
+    }
+
+    if (auto err = walk.parse(path, std::as_const(data), depth, file))
+    {
+        return err;
+    }
+
+    // The file's _lib loads before the file.
+    const std::string dir = DirectoryOf(path, walk.separators);
+    auto lib = file.tags.find("_lib");
+    if (lib != file.tags.end() && !lib->second.empty())
+    {
+        File library;
+        if (auto err = WalkFile(dir + lib->second, depth + 1, library, walk))
+        {
+            return err;
+        }
+    }
+
+    if (auto err = walk.add(path, std::as_const(data), depth, std::as_const(file)))
+    {
+        return err;
+    }
+
+    if (!walk.rules.count_reached)
+    {
+        walk.files++;
+    }
+
+    // The file's _lib2, _lib3 and on load after the file.
+    for (int n = 2;; n++)
+    {
+        auto it = file.tags.find("_lib" + std::to_string(n));
+        if (it == file.tags.end())
+        {
+            break;
+        }
+
+        // An empty one names no library. So does an empty _lib.
+        if (it->second.empty())
+        {
+            continue;
+        }
+
+        File library;
+        if (auto err = WalkFile(dir + it->second, depth + 1, library, walk))
+        {
+            return err;
+        }
+    }
+
+    return std::nullopt;
+}
+
+} // namespace detail
+
+// Walks the file at `path` and the libraries that its _lib tags name, in loading order: first its _lib with that
+// library's chain, then the file itself, then its _lib2, _lib3 and on, each with its chain. An empty _lib or _libN
+// names no library. The numbers end before the first one that the file doesn't name. Paths in _lib tags are relative to
+// the directory of the file that names them: its path up to the last of `separators`.
+//
+// `reader` reads each file. A File has the file's tags in `tags`. `parse(path, data, depth, file)` parses the bytes
+// `data` of the file at `path` into `file`. `add(path, data, depth, file)` adds the file to the set once the file's
+// _lib has loaded. `depth` counts the library tags that led to the file. The file at `path` has depth 0. Its File is
+// `top`. Each callback returns an error or nothing. The first error stops the walk. WalkSet returns it.
+//
+// A walk also stops with an error at a file more than kMaxLibDepth library tags down, at a set of more than
+// kMaxSetFiles files (see WalkRules), and at a file that `reader` can't read: "can't read" and the file's path.
+template <typename File, typename Parse, typename Add>
+std::optional<std::string> WalkSet(const std::string& path, const FileReader& reader, std::string_view separators,
+                                   File& top, const Parse& parse, const Add& add, const WalkRules& rules = {})
+{
+    detail::SetWalk<Parse, Add> walk{reader, separators, parse, add, rules};
+
+    return detail::WalkFile(path, 0, top, walk);
+}
+
 namespace detail
 {
 
@@ -200,89 +333,56 @@ std::optional<std::string> TakeDescriptor(const std::string& path, const std::ve
     return std::nullopt;
 }
 
-// Loads the file at `path` into `out`: first its _lib, then the file itself, then its _lib2 and on. `depth` counts the
-// library tags that led to the file. The file at depth 0 heads the set and gives it its tags.
+// Loads the file at `path` and its libraries into `out` (see WalkSet). The set takes its tags from the file at `path`.
 template <typename Format>
-std::optional<std::string> LoadRecursive(const std::string& path, const FileReader& reader, std::string_view separators,
-                                         LoadedSet<Format>& out, int depth)
+std::optional<std::string> LoadFiles(const std::string& path, const FileReader& reader, std::string_view separators,
+                                     LoadedSet<Format>& out)
 {
-    if (depth > kMaxLibDepth)
-    {
-        return "_lib nesting too deep";
-    }
-
-    if (out.sources.size() >= kMaxSetFiles)
-    {
-        return "more than " + std::to_string(kMaxSetFiles) + " files in the set";
-    }
-
-    std::vector<uint8_t> data;
-    if (!reader(path, data))
-    {
-        return "can't read " + path;
-    }
-
     // A streaming format reads the program later, straight into its chunks.
-    PsfFile psf;
-    if (auto err = ParsePsf(data, psf, !kStreaming<Format>))
+    const auto parse = [](const std::string& file_path, const std::vector<uint8_t>& data, int,
+                          PsfFile& psf) -> std::optional<std::string>
     {
-        return path + ": " + *err;
-    }
+        if (auto err = ParsePsf(data, psf, !kStreaming<Format>))
+        {
+            return file_path + ": " + *err;
+        }
 
-    if (psf.version != Format::kPsfVersion)
-    {
-        return path + ": not " + AFileOf<Format>() + " (PSF version " + Hex(psf.version, 2) + ")";
-    }
+        if (psf.version != Format::kPsfVersion)
+        {
+            return file_path + ": not " + AFileOf<Format>() + " (PSF version " + Hex(psf.version, 2) + ")";
+        }
 
-    const std::string dir = DirectoryOf(path, separators);
-    auto lib = psf.tags.find("_lib");
-    if (lib != psf.tags.end() && !lib->second.empty())
+        return std::nullopt;
+    };
+
+    const auto add = [&out](const std::string& file_path, const std::vector<uint8_t>& data, int,
+                            const PsfFile& psf) -> std::optional<std::string>
     {
-        if (auto err = LoadRecursive(dir + lib->second, reader, separators, out, depth + 1))
+        ProgramChunks chunks;
+        if (auto err = ReadChunks<Format>(file_path, data, psf, chunks))
         {
             return err;
         }
-    }
 
-    ProgramChunks chunks;
-    if (auto err = ReadChunks<Format>(path, data, psf, chunks))
+        AddChunks(chunks, out);
+
+        if (auto err = TakeDescriptor(file_path, psf.reserved, out))
+        {
+            return err;
+        }
+
+        out.sources.push_back(file_path);
+
+        return std::nullopt;
+    };
+
+    PsfFile top;
+    if (auto err = WalkSet(path, reader, separators, top, parse, add))
     {
         return err;
     }
 
-    AddChunks(chunks, out);
-
-    if (auto err = TakeDescriptor(path, psf.reserved, out))
-    {
-        return err;
-    }
-
-    out.sources.push_back(path);
-
-    for (int n = 2;; n++)
-    {
-        auto it = psf.tags.find("_lib" + std::to_string(n));
-        if (it == psf.tags.end())
-        {
-            break;
-        }
-
-        // An empty one names no library. So does an empty _lib.
-        if (it->second.empty())
-        {
-            continue;
-        }
-
-        if (auto err = LoadRecursive(dir + it->second, reader, separators, out, depth + 1))
-        {
-            return err;
-        }
-    }
-
-    if (depth == 0)
-    {
-        out.tags = psf.tags;
-    }
+    out.tags = std::move(top.tags);
 
     return std::nullopt;
 }
@@ -299,7 +399,7 @@ std::optional<std::string> LoadSet(const std::string& path, const FileReader& re
 {
     out = LoadedSet<Format>{};
 
-    if (auto err = detail::LoadRecursive(path, reader, separators, out, 0))
+    if (auto err = detail::LoadFiles(path, reader, separators, out))
     {
         return err;
     }

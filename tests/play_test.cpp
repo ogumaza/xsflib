@@ -15,8 +15,10 @@
 #include <string>
 #include <vector>
 
+#include "xsflib/files.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/testing/check.h"
+#include "xsflib/testing/command_line.h"
 #include "xsflib/testing/temp_folder.h"
 
 using xsflib::testing::Check;
@@ -142,7 +144,7 @@ public:
 
 // Runs a stand-in's play tool with `args` and returns its exit code.
 template <typename Player = StandInPlayer>
-int RunWith(std::vector<std::string> args)
+int RunWith(const std::vector<std::string>& args)
 {
     xsflib::cli::PlayTool<Player> tool;
     tool.name = "testplay";
@@ -156,46 +158,56 @@ int RunWith(std::vector<std::string> args)
         return std::string("a stand-in set");
     };
 
-    args.insert(args.begin(), "testplay");
-    std::vector<char*> argv;
-    for (std::string& a : args)
-    {
-        argv.push_back(a.data());
-    }
+    xsflib::testing::CommandLine command_line("testplay", args);
 
-    return xsflib::cli::RunPlayTool(tool, static_cast<int>(argv.size()), argv.data());
+    return xsflib::cli::RunPlayTool(tool, command_line.Argc(), command_line.Argv());
+}
+
+// A render, --info, a library, a folder, bad arguments, a missing input and a set's rate. The paths go to the tool as
+// UTF-8.
+void TestPlayTool()
+{
+    const xsflib::testing::TempFolder temp("xsflib_play_test");
+    const fs::path& dir = temp.Path();
+    const fs::path mini = dir / "song.minitest";
+    const fs::path library = dir / "set.testlib";
+    const fs::path set_rate_wav = dir / "set_rate.wav";
+    std::ofstream(mini, std::ios::binary) << "x";
+    std::ofstream(library, std::ios::binary) << "x";
+
+    const int rendered = RunWith({xsflib::Utf8(mini)});
+    const int info = RunWith({"--info", xsflib::Utf8(mini)});
+    const int skipped = RunWith({xsflib::Utf8(library)});
+    const int folder = RunWith({xsflib::Utf8(dir)});
+    const int no_value = RunWith({"--length"});
+    const int bad_time = RunWith({"--length", "x", xsflib::Utf8(mini)});
+    const int missing = RunWith({xsflib::Utf8(dir / "missing.minitest")});
+    const int set_rate = RunWith<SetRatePlayer>({"-o", xsflib::Utf8(set_rate_wav), xsflib::Utf8(mini)});
+
+    Check(rendered == 0, "a render succeeds");
+    Check(fs::exists(dir / "song.wav") && fs::file_size(dir / "song.wav") == 44 + 1000 * 4, "the WAV file holds 1 s");
+    Check(info == 0, "--info succeeds");
+    Check(set_rate == 0 && fs::file_size(set_rate_wav) == 44 + 2000 * 4, "a set's rate decides the frames of a render");
+    Check(skipped == 0 && !fs::exists(dir / "set.wav"), "a library is skipped");
+    Check(folder == 1, "a folder fails");
+    Check(no_value == 2 && bad_time == 2, "bad arguments exit with 2");
+    Check(missing == 1, "a missing input fails");
+}
+
+void TestDescribeChunks()
+{
+    Check(xsflib::cli::DescribeChunks(ChunkSet{}) == "3 memory chunks, 2 files", "the description of a set's chunks");
 }
 
 } // namespace
 
 int main()
 {
-    const xsflib::testing::TempFolder temp("xsflib_play_test");
-    const fs::path& dir = temp.Path();
-    const fs::path mini = dir / "song.minitest";
-    const fs::path library = dir / "set.testlib";
-    std::ofstream(mini, std::ios::binary) << "x";
-    std::ofstream(library, std::ios::binary) << "x";
+    const auto tests = []
+    {
+        TestPlayTool();
+        TestDescribeChunks();
+    };
 
-    const int rendered = RunWith({mini.string()});
-    const int info = RunWith({"--info", mini.string()});
-    const int skipped = RunWith({library.string()});
-    const int folder = RunWith({dir.string()});
-    const int no_value = RunWith({"--length"});
-    const int bad_time = RunWith({"--length", "x", mini.string()});
-    const int missing = RunWith({(dir / "missing.minitest").string()});
-    const fs::path set_rate_wav = dir / "set_rate.wav";
-    const int set_rate = RunWith<SetRatePlayer>({"-o", set_rate_wav.string(), mini.string()});
-
-    Check(rendered == 0, "a render succeeds");
-    Check(fs::exists(dir / "song.wav") && fs::file_size(dir / "song.wav") == 44 + 1000 * 4, "the WAV file holds 1 s");
-    Check(info == 0, "--info succeeds");
-    Check(set_rate == 0 && fs::file_size(set_rate_wav) == 44 + 2000 * 4, "a set's rate decides the frames of a render");
-    Check(skipped == 0, "a library is skipped");
-    Check(folder == 1, "a folder fails");
-    Check(no_value == 2 && bad_time == 2, "bad arguments exit with 2");
-    Check(missing == 1, "a missing input fails");
-    Check(xsflib::cli::DescribeChunks(ChunkSet{}) == "3 memory chunks, 2 files", "the description of a set's chunks");
-
-    return xsflib::testing::Summary("play tool");
+    return xsflib::testing::RunTest("play tool", tests);
 }

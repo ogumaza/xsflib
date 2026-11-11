@@ -172,6 +172,20 @@ private:
         std::unique_ptr<Playback<Player>> playback_;
     };
 
+    // A source with the limit, the rate and the pre-roll that go with it, for a player whose rate depends on the set.
+    struct RatedSource
+    {
+        std::unique_ptr<Source> source;
+        uint64_t keep_frames = 0;
+        int sample_rate = 0;
+        uint64_t pre_roll_frames = 0;
+    };
+
+    explicit RenderAhead(RatedSource rated)
+        : RenderAhead(std::move(rated.source), rated.keep_frames, rated.sample_rate, rated.pre_roll_frames)
+    {
+    }
+
     template <typename Player>
     static std::unique_ptr<Source> FromPlayback(std::unique_ptr<Playback<Player>> playback, uint64_t keep_frames)
     {
@@ -185,15 +199,6 @@ private:
         return std::make_unique<PlaybackSource<Player>>(std::move(playback));
     }
 
-    // A source with the limit, the rate and the pre-roll that go with it, for a player whose rate depends on the set.
-    struct RatedSource
-    {
-        std::unique_ptr<Source> source;
-        uint64_t keep_frames = 0;
-        int sample_rate = 0;
-        uint64_t pre_roll_frames = 0;
-    };
-
     template <typename Player>
     static RatedSource AtItsRate(std::unique_ptr<Playback<Player>> playback)
     {
@@ -204,13 +209,13 @@ private:
         return {std::move(source), keep_frames, sample_rate, PreRollFrames(sample_rate)};
     }
 
-    explicit RenderAhead(RatedSource rated)
-        : RenderAhead(std::move(rated.source), rated.keep_frames, rated.sample_rate, rated.pre_roll_frames)
-    {
-    }
-
     void Run();
     void Loop();
+
+    // Handles the latest seek for Loop, with `lock` held. `held` counts the rendered frames that wait to be buffered.
+    // Seeks the source and discards the buffer and `held` when the target is neither buffered nor quicker to reach by
+    // rendering on. Returns true after such a seek, with `lock` held again.
+    bool HandleSeek(std::unique_lock<std::mutex>& lock, std::size_t& held);
 
     // Copies frames [from, from + frames) from the buffer.
     void Copy(int16_t* out, uint64_t from, std::size_t frames) const;

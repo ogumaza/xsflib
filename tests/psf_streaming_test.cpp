@@ -16,6 +16,7 @@
 
 #include <zlib.h>
 
+#include "test_descriptor.h"
 #include "xsflib/bytes.h"
 #include "xsflib/psf/program.h"
 #include "xsflib/psf/psf.h"
@@ -78,7 +79,8 @@ void TestChunks()
 
     XSFLIB_CHECK(b.Data().size() % 4 == 0);
     XSFLIB_CHECK(!err);
-    XSFLIB_CHECK(chunks.files.size() == 2 && chunks.sound == 0x01000005u);
+    XSFLIB_CHECK(chunks.sound == 0x01000005u);
+    XSFLIB_REQUIRE(chunks.files.size() == 2);
     XSFLIB_CHECK(chunks.files[0].path == "content/a.bin" &&
                  chunks.files[0].data == (std::vector<uint8_t>{9, 8, 7, 6, 5}));
     XSFLIB_CHECK(chunks.files[1].path == "code/b.bin" && chunks.files[1].data == std::vector<uint8_t>{1});
@@ -351,42 +353,6 @@ void TestStreamedChunks()
     }
 }
 
-// A descriptor that is its magic and its version: one that a version 1 player rejects has another version.
-template <uint32_t magic>
-struct TestDescriptor
-{
-    static std::optional<TestDescriptor> Parse(const std::vector<uint8_t>& data)
-    {
-        if (data.size() < 8 || LoadLe32(data.data()) != magic)
-        {
-            return std::nullopt;
-        }
-
-        return TestDescriptor{LoadLe32(&data[4])};
-    }
-
-    std::optional<std::string> Check() const
-    {
-        if (version != 1)
-        {
-            return "the descriptor's version is " + std::to_string(version);
-        }
-
-        return std::nullopt;
-    }
-
-    std::vector<uint8_t> Serialize() const
-    {
-        std::vector<uint8_t> v;
-        Put32(v, magic);
-        Put32(v, version);
-
-        return v;
-    }
-
-    uint32_t version = 1;
-};
-
 constexpr uint32_t kProcessMagic = 0x50525453; // "STRP"
 constexpr uint32_t kArchiveMagic = 0x41525453; // "STRA"
 
@@ -496,10 +462,13 @@ void TestStreamingSets()
 
 int main()
 {
-    TestChunks();
-    TestProgramPieces();
-    TestStreamedChunks();
-    TestStreamingSets();
+    const auto tests = []
+    {
+        TestChunks();
+        TestProgramPieces();
+        TestStreamedChunks();
+        TestStreamingSets();
+    };
 
-    return xsflib::testing::Summary("psf streaming");
+    return xsflib::testing::RunTest("psf streaming", tests);
 }

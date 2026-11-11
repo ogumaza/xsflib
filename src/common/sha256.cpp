@@ -2,7 +2,6 @@
 
 #include "xsflib/sha256.h"
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -10,6 +9,7 @@
 #include <span>
 #include <string>
 
+#include "sha_blocks.h"
 #include "xsflib/bytes.h"
 
 namespace xsflib
@@ -40,64 +40,24 @@ Sha256::Sha256()
 
 void Sha256::Update(std::span<const uint8_t> data)
 {
-    length_ += data.size();
-    while (!data.empty())
-    {
-        const std::size_t n = std::min(data.size(), buffer_.size() - buffered_);
-        std::copy_n(data.begin(), n, buffer_.begin() + static_cast<std::ptrdiff_t>(buffered_));
-        buffered_ += n;
-        data = data.subspan(n);
-
-        if (buffered_ == buffer_.size())
-        {
-            Block(buffer_.data());
-            buffered_ = 0;
-        }
-    }
+    detail::ShaUpdate(data, buffer_, buffered_, length_, [this](const uint8_t* block) { Block(block); });
 }
 
 Sha256::Digest Sha256::Finish()
 {
-    // Pad with a 1 bit, zeros up to 8 bytes short of a block, and the length in bits.
-    const uint64_t bits = length_ * 8;
-    const uint8_t kOne = 0x80;
-    Update({&kOne, 1});
+    detail::ShaPad(buffer_, buffered_, length_, [this](const uint8_t* block) { Block(block); });
 
-    const std::array<uint8_t, 64> kZeros{};
-    Update(std::span(kZeros).first((buffer_.size() * 2 - 8 - buffered_) % buffer_.size()));
-
-    std::array<uint8_t, 8> length;
-    StoreBe64(length.data(), bits);
-    Update(length);
-
-    Digest digest;
-    for (std::size_t i = 0; i < state_.size(); ++i)
-    {
-        StoreBe32(digest.data() + i * 4, state_[i]);
-    }
-
-    return digest;
+    return detail::ShaDigest(state_);
 }
 
 Sha256::Digest Sha256::Of(std::span<const uint8_t> data)
 {
-    Sha256 sha256;
-    sha256.Update(data);
-
-    return sha256.Finish();
+    return detail::ShaOf<Sha256>(data);
 }
 
 std::string Sha256::Hex(const Digest& digest)
 {
-    static const char kDigits[] = "0123456789abcdef";
-    std::string out;
-    for (const uint8_t byte : digest)
-    {
-        out += kDigits[byte >> 4];
-        out += kDigits[byte & 15];
-    }
-
-    return out;
+    return detail::ShaHex(digest);
 }
 
 // One block of the message (FIPS 180-4, 6.2.2).

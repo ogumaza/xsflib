@@ -13,10 +13,10 @@
 # Both modes use xsflib_float_options. CHECK_COMPILERS also uses xsflib_prefix_map_options.
 include(${CMAKE_CURRENT_LIST_DIR}/XsflibTargets.cmake)
 
-# Sets the C++ standard, a release build by default, the static C runtime and the compiler options. CHECK_COMPILERS
-# rejects the unsupported compilers. On Windows, that's every compiler but clang-cl. Elsewhere, it's GCC and Clang for
-# 32-bit x86. Their output would differ from other builds. The error names the project NAME. CHECK_COMPILERS also sets
-# <PREFIX>_CLANG_CL for clang-cl. Unless NO_WARNINGS is given, it sets <PREFIX>_WARNINGS
+# Sets the C++ standard, a release build by default, the static C runtime and the compiler options. Both modes reject
+# every compiler on Windows but clang-cl. CHECK_COMPILERS also rejects GCC and Clang for 32-bit x86 elsewhere. Their
+# output would differ from other builds. The error names the project NAME, or PROJECT_NAME without it. CHECK_COMPILERS
+# also sets <PREFIX>_CLANG_CL for clang-cl. Unless NO_WARNINGS is given, it sets <PREFIX>_WARNINGS
 # (xsflib_project_warnings). NOMINMAX defines NOMINMAX on Windows. WARNINGS_ON_EVERY_TARGET adds the warnings to every
 # target instead.
 macro(xsflib_project)
@@ -27,10 +27,10 @@ macro(xsflib_project)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
 
-    if (_xsflib_project_CHECK_COMPILERS)
-        # Reject unsupported compilers. Windows builds require clang-cl. The other compilers that take MSVC's options,
-        # such as MSVC's cl.exe, are unsupported. On 32-bit x86, GCC and Clang use x87 floating point with extra
-        # precision. Their output would then differ from other builds. clang-cl gets SSE2 there below.
+    if (_xsflib_project_CHECK_COMPILERS OR _xsflib_project_WARNINGS_ON_EVERY_TARGET)
+        if (NOT _xsflib_project_NAME)
+            set(_xsflib_project_NAME ${PROJECT_NAME})
+        endif()
         if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
             set(_xsflib_project_compiler "MSVC's cl.exe")
         elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -38,6 +38,8 @@ macro(xsflib_project)
         else()
             set(_xsflib_project_compiler ${CMAKE_CXX_COMPILER_ID})
         endif()
+        # Windows builds require clang-cl. The other compilers that take MSVC's options, such as MSVC's cl.exe, are
+        # unsupported.
         if (WIN32 AND NOT MSVC)
             message(FATAL_ERROR "${_xsflib_project_NAME} doesn't support ${_xsflib_project_compiler} on Windows, such "
                                 "as MinGW's GCC or the GNU-style clang++. Build with Visual Studio's clang-cl (cmake -T "
@@ -47,6 +49,11 @@ macro(xsflib_project)
             message(FATAL_ERROR "${_xsflib_project_NAME} doesn't support ${_xsflib_project_compiler}. Build with Visual "
                                 "Studio's clang-cl (cmake -T ClangCL). README.md has the steps.")
         endif()
+    endif()
+
+    if (_xsflib_project_CHECK_COMPILERS)
+        # On 32-bit x86, GCC and Clang use x87 floating point with extra precision. Their output would then differ from
+        # other builds. clang-cl gets SSE2 there below.
         if (NOT MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(i.86|x86|x86_64|AMD64)$")
             message(FATAL_ERROR "${_xsflib_project_NAME} doesn't support 32-bit x86 builds with "
                                 "${_xsflib_project_compiler}: their output would differ from other builds. Build for "
@@ -72,11 +79,6 @@ macro(xsflib_project)
         if (NOT _xsflib_project_NO_WARNINGS)
             xsflib_project_warnings(${_xsflib_project_PREFIX})
         endif()
-        # Windows: windows.h defines min and max as macros unless NOMINMAX is defined. Those macros break std::min,
-        # std::max and std::numeric_limits::max.
-        if (_xsflib_project_NOMINMAX AND WIN32)
-            add_compile_definitions(NOMINMAX)
-        endif()
     elseif (_xsflib_project_WARNINGS_ON_EVERY_TARGET)
         if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
             set(CMAKE_BUILD_TYPE Release)
@@ -93,6 +95,12 @@ macro(xsflib_project)
         add_compile_options(${_xsflib_project_float_options})
     else()
         message(FATAL_ERROR "xsflib_project: give CHECK_COMPILERS or WARNINGS_ON_EVERY_TARGET")
+    endif()
+
+    # Windows: windows.h defines min and max as macros unless NOMINMAX is defined. Those macros break std::min,
+    # std::max and std::numeric_limits::max.
+    if (_xsflib_project_NOMINMAX AND WIN32)
+        add_compile_definitions(NOMINMAX)
     endif()
 
     foreach (_xsflib_project_variable IN ITEMS CHECK_COMPILERS WARNINGS_ON_EVERY_TARGET NOMINMAX NO_WARNINGS NAME

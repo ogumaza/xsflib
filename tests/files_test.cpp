@@ -2,15 +2,19 @@
 
 // Checks the common files' helpers for files and numbers (xsflib/files.h and xsflib/text.h): UTF-8 paths, reading and
 // writing whole files, hex, and whole numbers from text.
+// The test also checks how SplitList splits a list into its items.
 
 #include "xsflib/files.h"
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <ios>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "xsflib/testing/check.h"
@@ -65,14 +69,17 @@ void TestFiles()
     XSFLIB_CHECK(xsflib::ReadStream(stream, read) && read == std::vector<uint8_t>({'a', 'b', 'c', 0, 'd', 'e', 'f'}));
 }
 
-void TestNumbers()
+void TestHex()
 {
     XSFLIB_CHECK(xsflib::Hex(0) == "0x0");
     XSFLIB_CHECK(xsflib::Hex(0x1f) == "0x1f");
     XSFLIB_CHECK(xsflib::Hex(0x1f, 8) == "0x0000001f");
     XSFLIB_CHECK(xsflib::Hex(0xffffffff, 8) == "0xffffffff");
     XSFLIB_CHECK(xsflib::Hex(0xabc, 8, true) == "0x00000ABC");
+}
 
+void TestParseInteger()
+{
     XSFLIB_CHECK(xsflib::ParseInteger("12") == 12);
     XSFLIB_CHECK(xsflib::ParseInteger("-12") == -12);
     XSFLIB_CHECK(xsflib::ParseInteger("0x1F") == 31);
@@ -86,15 +93,25 @@ void TestNumbers()
     XSFLIB_CHECK(!xsflib::ParseInteger(" 1"));
     XSFLIB_CHECK(!xsflib::ParseInteger("1 "));
     XSFLIB_CHECK(!xsflib::ParseInteger("1.5"));
+}
 
+void TestIntegerErrors()
+{
     // The reason for no number, and a rule without the minus sign.
     xsflib::IntegerError why = xsflib::IntegerError::kOutOfRange;
 
     XSFLIB_CHECK(!xsflib::ParseInteger("12a", {}, &why) && why == xsflib::IntegerError::kNotNumber);
     XSFLIB_CHECK(!xsflib::ParseInteger("0x100000000", {}, &why) && why == xsflib::IntegerError::kOutOfRange);
     XSFLIB_CHECK(!xsflib::ParseInteger("99999999999a", {}, &why) && why == xsflib::IntegerError::kNotNumber);
-    XSFLIB_CHECK(!xsflib::ParseInteger("-5", {.minus = false}, &why) && why == xsflib::IntegerError::kNotNumber);
 
+    // As in each check above, `why` starts from the other reason.
+    why = xsflib::IntegerError::kOutOfRange;
+
+    XSFLIB_CHECK(!xsflib::ParseInteger("-5", {.minus = false}, &why) && why == xsflib::IntegerError::kNotNumber);
+}
+
+void TestIntegerRules()
+{
     // Base 16 takes the prefix or not. Base 10 takes none.
     const xsflib::IntegerRules kHex = {16};
 
@@ -114,7 +131,10 @@ void TestNumbers()
     XSFLIB_CHECK(!xsflib::ParseInteger("", kC10) && !xsflib::ParseInteger(" ", kC10) &&
                  !xsflib::ParseInteger("5 ", kC10));
     XSFLIB_CHECK(!xsflib::ParseInteger("0x", kC16) && !xsflib::ParseInteger("12g", kC16));
+}
 
+void TestParseAssignment()
+{
     // An assignment "N=V" takes ParseInteger's numbers on either side of the first '='.
     const auto assignment = xsflib::ParseAssignment("3=-0x10");
     XSFLIB_CHECK(assignment && assignment->index == 3 && assignment->value == -16);
@@ -123,7 +143,20 @@ void TestNumbers()
     XSFLIB_CHECK(!xsflib::ParseAssignment("3=4=5") && !xsflib::ParseAssignment(" 3=4") &&
                  !xsflib::ParseAssignment("a=4"));
     XSFLIB_CHECK(!xsflib::ParseAssignment("1=-1", {.minus = false}) && xsflib::ParseAssignment("1=-1"));
+}
 
+void TestSplitList()
+{
+    // The items of a list lie between commas and white space. Separators may repeat, lead or trail.
+    using Items = std::vector<std::string_view>;
+    XSFLIB_CHECK((xsflib::SplitList("0=1, 17=-1") == Items{"0=1", "17=-1"}));
+    XSFLIB_CHECK((xsflib::SplitList(" 8-14\n\r\t3,,4, ") == Items{"8-14", "3", "4"}));
+    XSFLIB_CHECK((xsflib::SplitList("T:0=1") == Items{"T:0=1"}));
+    XSFLIB_CHECK(xsflib::SplitList("").empty() && xsflib::SplitList(" ,\r\n").empty());
+}
+
+void TestReadDecimal()
+{
     // Decimals: a comma counts as a point without C's rules. C's rules take white space, hex and infinity.
     const auto comma = xsflib::ReadDecimal("8000,5");
     XSFLIB_CHECK(comma && comma->value == 8000.5 && comma->length == 6);
@@ -139,6 +172,9 @@ void TestNumbers()
     const auto hex_float = xsflib::ReadDecimal("0x1F40", kC);
     XSFLIB_CHECK(hex_float && hex_float->value == 8000.0 && hex_float->length == 6);
 
+    const auto infinity = xsflib::ReadDecimal("inf", kC);
+    XSFLIB_CHECK(infinity && std::isinf(infinity->value) && infinity->length == 3 && !xsflib::ReadDecimal("inf"));
+
     XSFLIB_CHECK(!xsflib::ReadDecimal("", kC) && !xsflib::ReadDecimal("x", kC) && !xsflib::ReadDecimal(" ", kC));
 }
 
@@ -146,9 +182,18 @@ void TestNumbers()
 
 int main()
 {
-    TestPaths();
-    TestFiles();
-    TestNumbers();
+    const auto tests = []
+    {
+        TestPaths();
+        TestFiles();
+        TestHex();
+        TestParseInteger();
+        TestIntegerErrors();
+        TestIntegerRules();
+        TestParseAssignment();
+        TestSplitList();
+        TestReadDecimal();
+    };
 
-    return xsflib::testing::Summary("files");
+    return xsflib::testing::RunTest("files", tests);
 }

@@ -3,6 +3,7 @@
 // Helpers for the tests of PSF sets: a set's files held in memory, the loader's error for a set, a render's frames, the
 // whole of a set's playback, and checks of a playback's length, fade, end, volume and seeks, and of the sets that a
 // playback rejects.
+// Peak gives the peak of a render.
 
 #pragma once
 
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -22,6 +24,26 @@
 namespace xsflib::testing
 {
 
+namespace detail
+{
+
+// Copies the file that `files` contains under `key` to `out`. Returns false if `files` has no file under `key`.
+inline bool ReadFromMap(const std::map<std::string, std::vector<uint8_t>>& files, const std::string& key,
+                        std::vector<uint8_t>& out)
+{
+    const auto it = files.find(key);
+    if (it == files.end())
+    {
+        return false;
+    }
+
+    out = it->second;
+
+    return true;
+}
+
+} // namespace detail
+
 // A reader of `files`, a set's files by path. Reading a path gives the file that `files` holds under the path's
 // lexically normal form, with / between its parts. The paths of a set's libraries then resolve as they do on disk. The
 // reader keeps a reference to `files`. `files` has to outlive the reader.
@@ -29,15 +51,18 @@ inline psf::FileReader MapReader(const std::map<std::string, std::vector<uint8_t
 {
     return [&files](const std::string& path, std::vector<uint8_t>& out)
     {
-        const auto it = files.find(std::filesystem::path(path).lexically_normal().generic_string());
-        if (it == files.end())
-        {
-            return false;
-        }
+        return detail::ReadFromMap(files, std::filesystem::path(path).lexically_normal().generic_string(), out);
+    };
+}
 
-        out = it->second;
-
-        return true;
+// A reader of `files`, a set's files by path, that looks each path up exactly as the loader passes it. A path up from a
+// folder, such as "dir/sub/../lib.xyz", reaches `files` unchanged. So does a path that names no file on disk, such as
+// an archive's path for a file inside it. The reader keeps a reference to `files`. `files` has to outlive the reader.
+inline psf::FileReader ExactReader(const std::map<std::string, std::vector<uint8_t>>& files)
+{
+    return [&files](const std::string& path, std::vector<uint8_t>& out)
+    {
+        return detail::ReadFromMap(files, path, out);
     };
 }
 
@@ -109,6 +134,7 @@ inline void CheckLengthAndFade(const std::vector<int16_t>& played, const std::ve
         const double gain = 1.0 - static_cast<double>(i / 2) / static_cast<double>(fade);
         faded = played[2 * length + i] == static_cast<int16_t>(std::round(model[2 * length + i] * gain));
     }
+
     Check(faded, "the fade falls linearly over its frames");
 }
 
@@ -122,6 +148,18 @@ inline void CheckEnd(const std::vector<int16_t>& played, const std::vector<int16
           "the set without a length plays the model's output");
 }
 
+// The largest magnitude among `samples`. A sound that sounded has a peak above 0.
+inline int Peak(std::span<const int16_t> samples)
+{
+    int peak = 0;
+    for (const int16_t sample : samples)
+    {
+        peak = std::max(peak, std::abs(static_cast<int>(sample)));
+    }
+
+    return peak;
+}
+
 // Checks that each sample of `scaled` is the sample of `played` times `volume`, rounded.
 inline void CheckVolume(const std::vector<int16_t>& scaled, const std::vector<int16_t>& played, double volume)
 {
@@ -130,6 +168,7 @@ inline void CheckVolume(const std::vector<int16_t>& scaled, const std::vector<in
     {
         same = scaled[i] == static_cast<int16_t>(std::round(played[i] * volume));
     }
+
     Check(same, "the volume tag scales every sample");
 }
 
@@ -149,6 +188,7 @@ void CheckSeeks(const std::string& path, const psf::FileReader& reader, const st
                  playback.Render(buffer.data(), block) == block && straight.size() >= 2 * (frame + block) &&
                  std::equal(buffer.begin(), buffer.end(), straight.begin() + static_cast<std::ptrdiff_t>(2 * frame));
     }
+
     Check(landed, path + ": seeks land where a straight render does");
 }
 

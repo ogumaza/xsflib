@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -18,7 +19,11 @@ namespace xsflib::rip
 bool WriteFile(const std::filesystem::path& path, const std::vector<uint8_t>& data);
 
 // Returns the input's absolute path, without the trailing separator of a folder given as "game/" or ".".
-std::filesystem::path InputPath(const std::string& input);
+inline std::filesystem::path InputPath(const std::string& input)
+{
+    const std::filesystem::path path = std::filesystem::absolute(input).lexically_normal();
+    return path.has_filename() ? path : path.parent_path();
+}
 
 // The name of `input`: the image's or archive's file name without its extension, or the folder's name.
 std::string NameOfInput(const std::string& input);
@@ -31,8 +36,11 @@ std::string ReadHead(const std::string& path, std::size_t size = 8);
 // `suffix` added, such as "_xyz".
 std::filesystem::path DefaultOutputDir(const std::string& input, const std::string& suffix);
 
-// Prints the rip's output folder as the last line about the input.
-void ReportOutput(const std::filesystem::path& out_dir);
+// Prints the rip's output folder, or the play tool's output file, as the last line about the input.
+inline void ReportOutput(const std::filesystem::path& out_dir)
+{
+    std::fprintf(stderr, "output: %s\n", std::filesystem::absolute(out_dir).lexically_normal().string().c_str());
+}
 
 // The folders that the sets of a game's sound archives go in, given the archives' paths in the game's files. Each
 // folder's name is the archive's name without its extension. Where two archives' names are the same, ignoring case, the

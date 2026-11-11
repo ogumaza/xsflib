@@ -2,13 +2,14 @@
 
 // Unit tests for snapshots (save states): memory images (xsflib/memory_image.h).
 
+#include "xsflib/memory_image.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <random>
 #include <vector>
 
-#include "xsflib/memory_image.h"
 #include "xsflib/testing/check.h"
 
 using namespace xsflib;
@@ -93,7 +94,5 @@ void TestMemoryImages()
 
 int main()
 {
-    TestMemoryImages();
-
-    return xsflib::testing::Summary("snapshot");
+    return xsflib::testing::RunTest("memory image", TestMemoryImages);
 }

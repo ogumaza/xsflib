@@ -2,25 +2,16 @@
 
 #include "xsflib/sha1.h"
 
-#include <algorithm>
-#include <cstddef>
+#include <bit>
 #include <cstdint>
 #include <span>
 #include <string>
 
+#include "sha_blocks.h"
 #include "xsflib/bytes.h"
 
 namespace xsflib
 {
-namespace
-{
-
-uint32_t Rotate(uint32_t x, int n)
-{
-    return (x << n) | (x >> (32 - n));
-}
-
-} // namespace
 
 Sha1::Sha1() : state_{0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0}
 {
@@ -28,64 +19,24 @@ Sha1::Sha1() : state_{0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0
 
 void Sha1::Update(std::span<const uint8_t> data)
 {
-    length_ += data.size();
-    while (!data.empty())
-    {
-        const std::size_t n = std::min(data.size(), buffer_.size() - buffered_);
-        std::copy_n(data.begin(), n, buffer_.begin() + static_cast<std::ptrdiff_t>(buffered_));
-        buffered_ += n;
-        data = data.subspan(n);
-
-        if (buffered_ == buffer_.size())
-        {
-            Block(buffer_.data());
-            buffered_ = 0;
-        }
-    }
+    detail::ShaUpdate(data, buffer_, buffered_, length_, [this](const uint8_t* block) { Block(block); });
 }
 
 Sha1::Digest Sha1::Finish()
 {
-    // Pad with a 1 bit, zeros up to 8 bytes short of a block, and the length in bits.
-    const uint64_t bits = length_ * 8;
-    const uint8_t kOne = 0x80;
-    Update({&kOne, 1});
+    detail::ShaPad(buffer_, buffered_, length_, [this](const uint8_t* block) { Block(block); });
 
-    const uint8_t kZeros[64] = {};
-    Update({kZeros, (buffer_.size() * 2 - 8 - buffered_) % buffer_.size()});
-
-    uint8_t length[8];
-    StoreBe64(length, bits);
-    Update(length);
-
-    Digest digest;
-    for (std::size_t i = 0; i < state_.size(); ++i)
-    {
-        StoreBe32(digest.data() + i * 4, state_[i]);
-    }
-
-    return digest;
+    return detail::ShaDigest(state_);
 }
 
 Sha1::Digest Sha1::Of(std::span<const uint8_t> data)
 {
-    Sha1 sha1;
-    sha1.Update(data);
-
-    return sha1.Finish();
+    return detail::ShaOf<Sha1>(data);
 }
 
 std::string Sha1::Hex(const Digest& digest)
 {
-    static const char kDigits[] = "0123456789abcdef";
-    std::string out;
-    for (const uint8_t byte : digest)
-    {
-        out += kDigits[byte >> 4];
-        out += kDigits[byte & 15];
-    }
-
-    return out;
+    return detail::ShaHex(digest);
 }
 
 void Sha1::Block(const uint8_t* block)
@@ -98,7 +49,7 @@ void Sha1::Block(const uint8_t* block)
 
     for (int i = 16; i < 80; ++i)
     {
-        w[i] = Rotate(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+        w[i] = std::rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
     }
 
     uint32_t a = state_[0];
@@ -131,10 +82,10 @@ void Sha1::Block(const uint8_t* block)
             k = 0xCA62C1D6;
         }
 
-        const uint32_t t = Rotate(a, 5) + f + e + k + w[i];
+        const uint32_t t = std::rotl(a, 5) + f + e + k + w[i];
         e = d;
         d = c;
-        c = Rotate(b, 30);
+        c = std::rotl(b, 30);
         b = a;
         a = t;
     }

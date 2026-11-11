@@ -10,14 +10,17 @@
 namespace xsflib
 {
 
+// An ASCII letter in lower case, and any other character as it is.
+inline char AsciiLower(char c)
+{
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
 inline std::string AsciiLower(std::string s)
 {
     for (char& c : s)
     {
-        if (c >= 'A' && c <= 'Z')
-        {
-            c = static_cast<char>(c - 'A' + 'a');
-        }
+        c = AsciiLower(c);
     }
 
     return s;

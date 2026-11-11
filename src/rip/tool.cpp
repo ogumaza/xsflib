@@ -6,7 +6,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -27,12 +26,6 @@ namespace fs = std::filesystem;
 bool WriteFile(const fs::path& path, const std::vector<uint8_t>& data)
 {
     return !xsflib::WriteFile(path, data);
-}
-
-fs::path InputPath(const std::string& input)
-{
-    const fs::path path = fs::absolute(input).lexically_normal();
-    return path.has_filename() ? path : path.parent_path();
 }
 
 std::string NameOfInput(const std::string& input)
@@ -61,11 +54,6 @@ fs::path DefaultOutputDir(const std::string& input, const std::string& suffix)
     return InputPath(input).parent_path() / (NameOfInput(input) + suffix);
 }
 
-void ReportOutput(const fs::path& out_dir)
-{
-    std::fprintf(stderr, "output: %s\n", fs::absolute(out_dir).lexically_normal().string().c_str());
-}
-
 std::vector<std::string> ArchiveFolders(const std::vector<std::string>& paths)
 {
     // Each path's parts from the archive up: its name without the extension, then the folders above it.
@@ -77,6 +65,7 @@ std::vector<std::string> ArchiveFolders(const std::vector<std::string>& paths)
         {
             p.push_back(folder.filename().string());
         }
+
         parts.push_back(std::move(p));
     }
 
@@ -93,6 +82,7 @@ std::vector<std::string> ArchiveFolders(const std::vector<std::string>& paths)
             {
                 folders[i] = parts[i][j] + "_" + folders[i];
             }
+
             by_name[AsciiLower(folders[i])].push_back(i);
         }
 

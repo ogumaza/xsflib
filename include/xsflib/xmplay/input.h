@@ -57,16 +57,19 @@
 
 #include "xsflib/player/playback.h"
 #include "xsflib/player/render_ahead.h"
+#include "xsflib/psf/plugin_tags.h"
 #include "xsflib/psf/psf.h"
 #include "xsflib/utf8.h"
 
 namespace xsflib::xmplay
 {
-
 namespace detail
 {
 
 constexpr std::size_t kBlockFrames = 1024; // frames that Process renders or reads at a time
+
+// The size limit of the main window's format text, with its null. The SDK gives no size for XMPlay's buffer.
+constexpr std::size_t kFormatTextSize = 64;
 
 // The first XMPlay with 64-bit file sizes and seeks in XMPFUNC_FILE (GetSize64 and Seek64): 3.8.2.
 constexpr DWORD kMinXmplayVersion = 0x03080200;
@@ -86,21 +89,6 @@ constexpr int kApplyButton = 1000;
 constexpr int kMinLength = 1;
 constexpr int kMaxLength = 24 * 3600;
 constexpr int kMaxFade = 3600;
-
-// The XMPlay tag for a PSF tag: game is album, and year is date.
-inline std::string_view FieldFromTag(std::string_view tag)
-{
-    if (tag == "game")
-    {
-        return "album";
-    }
-    if (tag == "year")
-    {
-        return "date";
-    }
-
-    return tag;
-}
 
 // `text` in UTF-16, for Windows' functions.
 inline std::wstring Wide(std::string_view text)
@@ -211,8 +199,7 @@ private:
     // Whether XMPlay leaves the tag `name` out: a PSF tag that isn't metadata, or one of the format's playback tags.
     static bool IsHiddenTag(std::string_view name)
     {
-        return psf::IsSystemTag(name) || std::any_of(Traits::kPlaybackTags.begin(), Traits::kPlaybackTags.end(),
-                                                     [name](const char* tag) { return name == tag; });
+        return psf::IsHiddenTag(name, Traits::kPlaybackTags);
     }
 
     // The interface that GetInterface gives XMPlay.
@@ -250,6 +237,7 @@ private:
             {
                 list += '/';
             }
+
             list += Traits::kExtensions[i];
         }
 
@@ -309,8 +297,10 @@ private:
                 {
                     lengths[0] = seconds;
                 }
+
                 *length = lengths;
             }
+
             if (tags != nullptr)
             {
                 *tags = Copy(block);
@@ -387,6 +377,7 @@ private:
             {
                 playback_ = std::move(playback);
             }
+
             buffer_.resize(2 * detail::kBlockFrames);
 
             {
@@ -457,7 +448,7 @@ private:
     {
         if (format != nullptr)
         {
-            std::snprintf(format, 64, "%s - %d Hz", Traits::kName, SampleRate());
+            std::snprintf(format, detail::kFormatTextSize, "%s - %d Hz", Traits::kName, SampleRate());
         }
     }
 
@@ -595,6 +586,7 @@ private:
                 {
                     out[2 * done + i] = static_cast<float>(buffer_[i]) * kSampleScale;
                 }
+
                 done += got;
             }
 
@@ -741,7 +733,7 @@ private:
                 continue;
             }
 
-            block += detail::FieldFromTag(name);
+            block += psf::FieldFromTag(name);
             block += '\0';
             block += NativeText(value, utf8);
             block += '\0';
@@ -765,8 +757,7 @@ private:
     // The length and fade of a file with `tags`: from its length and fade tags, or the defaults.
     static player::TrackLength LengthOf(const psf::Tags& tags, const Settings& settings)
     {
-        return player::ResolveLength(psf::TagTimeMs(tags, "length"), psf::TagTimeMs(tags, "fade"),
-                                     OptionsFrom(settings));
+        return player::TagLength(tags, OptionsFrom(settings));
     }
 
     static float Seconds(const player::TrackLength& length)
@@ -809,14 +800,17 @@ private:
             {
                 settings.default_length_s = std::clamp(value, detail::kMinLength, detail::kMaxLength);
             }
+
             if (registry_->GetInt(section.c_str(), kFadeKey, &value))
             {
                 settings.default_fade_s = std::clamp(value, 0, detail::kMaxFade);
             }
+
             if (registry_->GetInt(section.c_str(), kEndlessKey, &value))
             {
                 settings.endless = value != 0;
             }
+
             if (registry_->GetInt(section.c_str(), kRenderAheadKey, &value))
             {
                 settings.render_ahead = value != 0;
@@ -873,6 +867,7 @@ private:
             std::lock_guard lock(settings_mutex_);
             settings_ = settings;
         }
+
         SaveSettings(settings);
         ShowSettings(page, settings);
     }

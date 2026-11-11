@@ -112,6 +112,13 @@ TrackLength ResolveLength(long long length_ms, long long fade_ms, const Playback
     return {length_ms, fade_ms >= 0 ? fade_ms : 0};
 }
 
+// The length for a file with `tags`: ResolveLength with the times of its length and fade tags.
+template <typename Player>
+TrackLength TagLength(const psf::Tags& tags, const PlaybackOptions<Player>& options)
+{
+    return ResolveLength(psf::TagTimeMs(tags, "length"), psf::TagTimeMs(tags, "fade"), options);
+}
+
 // Plays a set through `Player`. Open loads the set, and Start starts it. Render writes its stereo frames with the
 // length, fade and volume applied. Seek moves to a frame.
 template <typename Player>
@@ -201,6 +208,7 @@ public:
                 {
                     gain *= 1.0 - static_cast<double>(f - play_frames_) / static_cast<double>(fade_frames_);
                 }
+
                 for (int c = 0; c < 2; c++)
                 {
                     const double v = std::round(out[2 * i + c] * gain);
@@ -349,6 +357,11 @@ public:
         return player_;
     }
 
+    const Player& GetPlayer() const
+    {
+        return player_;
+    }
+
 private:
     using Snapshot = typename SnapshotOf<Player>::Type;
 
@@ -442,7 +455,9 @@ private:
         return {nullptr, !can_go_on || frame < position_};
     }
 
-    // Takes a snapshot if none has been taken yet in this stretch of interval_ frames.
+    // Takes a snapshot if this stretch of interval_ frames has none at or before the current position. The new snapshot
+    // replaces a later one in the same stretch. A seek back can leave such a snapshot. Each stretch then keeps its
+    // earliest snapshot. The thinning keeps that one too.
     void SaveIfDue()
     {
         if constexpr (HasSnapshots<Player>)
@@ -466,6 +481,12 @@ private:
             }
 
             latest_ = snapshot;
+            if (it != saved_.end() && it->position / interval_ == stretch)
+            {
+                *it = {position_, finished_at_, std::move(snapshot)};
+                return;
+            }
+
             saved_.insert(it, {position_, finished_at_, std::move(snapshot)});
 
             // Double the interval and keep the first snapshot in each new interval.

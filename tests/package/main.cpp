@@ -12,17 +12,20 @@
 
 int main()
 {
-    const xsflib::psf::Tags kTags = {{"title", "Package test"}, {"length", "1:00"}};
-    const std::vector<uint8_t> kReserved = {1, 2, 3, 4};
-    const std::vector<uint8_t> kProgram(1000, 0x5a);
+    const auto tests = []
+    {
+        const xsflib::psf::Tags kTags = {{"title", "Package test"}, {"length", "1:00"}};
+        const std::vector<uint8_t> kReserved = {1, 2, 3, 4};
+        const std::vector<uint8_t> kProgram(1000, 0x5a);
 
-    const std::vector<uint8_t> file = xsflib::psf::WritePsf(0x27, kReserved, kProgram, kTags);
-    xsflib::psf::PsfFile psf;
-    const std::optional<std::string> error = xsflib::psf::ParsePsf(file, psf);
+        const std::vector<uint8_t> file = xsflib::psf::WritePsf(0x27, kReserved, kProgram, kTags);
+        xsflib::psf::PsfFile psf;
+        const std::optional<std::string> error = xsflib::psf::ParsePsf(file, psf);
 
-    XSFLIB_CHECK(!error);
-    XSFLIB_CHECK(psf.version == 0x27 && psf.reserved == kReserved && psf.program == kProgram && psf.tags == kTags);
-    XSFLIB_CHECK(xsflib::psf::ParseTime(psf.tags.at("length")) == 60000);
+        XSFLIB_CHECK(!error);
+        XSFLIB_CHECK(psf.version == 0x27 && psf.reserved == kReserved && psf.program == kProgram && psf.tags == kTags);
+        XSFLIB_CHECK(xsflib::psf::ParseTime(psf.tags.at("length")) == 60000);
+    };
 
-    return xsflib::testing::Summary("package");
+    return xsflib::testing::RunTest("package", tests);
 }

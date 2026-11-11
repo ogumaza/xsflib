@@ -27,6 +27,12 @@ namespace
 constexpr uint64_t kMaxWavDataBytes = 0xffffffffu - 36;
 constexpr const char* kWavTooLong = "a WAV file can't hold 4 GiB of audio; write FLAC instead";
 
+// The FLAC encoder's compression level: the highest of the standard levels.
+constexpr uint32_t kFlacLevel = 8;
+
+// The frames passed to the FLAC encoder in each call.
+constexpr std::size_t kFlacBlockFrames = 8192;
+
 // True if the file name's extension is .flac in any case.
 bool IsFlac(const std::string& path)
 {
@@ -54,7 +60,7 @@ std::optional<std::string> WriteFlac(const std::string& path, const std::vector<
     FLAC__stream_encoder_set_channels(enc, 2);
     FLAC__stream_encoder_set_bits_per_sample(enc, 16);
     FLAC__stream_encoder_set_sample_rate(enc, rate);
-    FLAC__stream_encoder_set_compression_level(enc, 8);
+    FLAC__stream_encoder_set_compression_level(enc, kFlacLevel);
     FLAC__stream_encoder_set_total_samples_estimate(enc, pcm.size() / 2);
     if (FLAC__stream_encoder_init_file(enc, path.c_str(), nullptr, nullptr) != FLAC__STREAM_ENCODER_INIT_STATUS_OK)
     {
@@ -62,15 +68,12 @@ std::optional<std::string> WriteFlac(const std::string& path, const std::vector<
         return "can't write " + path;
     }
 
-    std::vector<FLAC__int32> buf(8192 * 2);
+    std::vector<FLAC__int32> buf(2 * kFlacBlockFrames);
     bool ok = true;
     for (std::size_t pos = 0; pos < pcm.size() && ok; pos += buf.size())
     {
         const std::size_t n = std::min(buf.size(), pcm.size() - pos);
-        for (std::size_t i = 0; i < n; i++)
-        {
-            buf[i] = pcm[pos + i];
-        }
+        std::copy_n(pcm.begin() + static_cast<std::ptrdiff_t>(pos), n, buf.begin());
         ok = FLAC__stream_encoder_process_interleaved(enc, buf.data(), static_cast<unsigned>(n / 2));
     }
 
