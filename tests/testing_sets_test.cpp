@@ -362,6 +362,132 @@ void TestSeekChecks(const std::string& what)
           what + ": a wrong first sample fails two checks of rendering ahead");
 }
 
+// The checks of a set's seeks render the reference from the set, then check a playback of it. They pass on the ramp,
+// with the default snapshots and with few.
+template <typename Player>
+void TestSetSeekChecks(const std::string& what)
+{
+    xsflib::player::PlaybackOptions<Player> few;
+    few.snapshot_interval = 1000;
+    few.max_snapshots = 2;
+
+    const auto seeking = [](const xsflib::player::PlaybackOptions<Player>& options)
+    {
+        xsflib::testing::CheckSeekingOfSet(options, "seeking a set", 8000);
+    };
+    const auto ahead = [](const xsflib::player::PlaybackOptions<Player>& options, uint64_t keep)
+    {
+        xsflib::testing::CheckRenderAheadOfSet(options, keep, "rendering ahead of a set", 8000);
+    };
+
+    Check(FailuresOf([&] { seeking({}); }) == 0, what + ": the seeks in a set pass");
+    Check(FailuresOf([&] { seeking(few); }) == 0, what + ": the seeks in a set pass with few snapshots");
+    Check(FailuresOf([&] { ahead({}, 1000); }) == 0, what + ": rendering ahead of a set passes");
+    Check(FailuresOf([&] { ahead(few, 1000); }) == 0, what + ": rendering ahead of a set passes with few snapshots");
+}
+
+// How FaultyRampPlayer goes wrong. The players count their loads from 1 across a case.
+struct Faults
+{
+    int loads = 0;        // the loads so far
+    int failing_load = 0; // the load that fails, or 0 for none
+    bool silent = false;  // whether the players render nothing
+    int shifted_from = 0; // the first load whose samples are 1 too high, or 0 for none
+};
+
+Faults g_faults;
+
+// A ramp player that goes wrong as g_faults sets.
+class FaultyRampPlayer : public RampPlayer
+{
+public:
+    bool Load(int length_ms)
+    {
+        load_ = ++g_faults.loads;
+
+        return load_ != g_faults.failing_load && RampPlayer::Load(length_ms);
+    }
+
+    std::size_t Render(int16_t* out, std::size_t frames)
+    {
+        if (g_faults.silent)
+        {
+            return 0;
+        }
+
+        const std::size_t rendered = RampPlayer::Render(out, frames);
+        if (g_faults.shifted_from != 0 && load_ >= g_faults.shifted_from)
+        {
+            for (std::size_t i = 0; i < 2 * rendered; i++)
+            {
+                out[i] = static_cast<int16_t>(out[i] + 1);
+            }
+        }
+
+        return rendered;
+    }
+
+private:
+    int load_ = 0;
+};
+
+// The failures and their messages from the checks of a set's seeks, or of rendering ahead of it, with `faults`.
+// Each message has to name the file and the line of the check that failed.
+int FailuresWith(const Faults& faults, bool seeking, std::string& messages)
+{
+    g_faults = faults;
+    const auto run = [seeking]
+    {
+        const xsflib::player::PlaybackOptions<FaultyRampPlayer> options;
+        if (seeking)
+        {
+            xsflib::testing::CheckSeekingOfSet(options, "the faulty set", 8000);
+        }
+        else
+        {
+            xsflib::testing::CheckRenderAheadOfSet(options, 1000, "the faulty set", 8000);
+        }
+    };
+
+    messages.clear();
+    const int found = FailuresOf(run, &messages);
+    g_faults = {};
+
+    return found;
+}
+
+// The checks of a set's seeks fail where the reference doesn't start or renders nothing, where the playback doesn't
+// start, and where the playback's samples differ from the reference's. Each failure names the case, and the file and
+// the line of its check.
+void TestSetSeekFailures()
+{
+    std::string messages;
+    const auto has = [&messages](const std::string& text)
+    {
+        return messages.find(text) != std::string::npos;
+    };
+
+    Check(FailuresWith({.failing_load = 1}, true, messages) > 0 && has("the faulty set: the reference starts"),
+          "seeking: a reference that doesn't start fails");
+    Check(has("seeks.h:"), "seeking: the failure names the file and the line of the check");
+    Check(FailuresWith({.failing_load = 1}, false, messages) > 0 && has("the faulty set: the reference starts"),
+          "rendering ahead: a reference that doesn't start fails");
+
+    Check(FailuresWith({.silent = true}, true, messages) > 0 && has("the faulty set: the reference renders"),
+          "seeking: a reference that renders nothing fails");
+
+    Check(FailuresWith({.failing_load = 2}, true, messages) == 1 && has("the faulty set: playback starts ("),
+          "seeking: a playback that doesn't start fails one check");
+    Check(has("seeks.h:"), "seeking: the failure names the file and the line of the check");
+    Check(FailuresWith({.failing_load = 2}, false, messages) == 1 && has("the faulty set: playback starts ("),
+          "rendering ahead: a playback that doesn't start fails one check");
+
+    Check(FailuresWith({.shifted_from = 2}, true, messages) > 1 && has("the faulty set: the samples after a seek to "),
+          "seeking: a playback that differs from the reference fails at the seeks");
+    Check(FailuresWith({.shifted_from = 2}, false, messages) > 1 && has("the faulty set: the samples after a seek to "),
+          "rendering ahead: a playback that differs from the reference fails at the seeks");
+}
+
 // A ramp player whose snapshots hold the player and the run that took them. It refuses an earlier run's snapshot, and
 // another player's unless `accepts_others_` is set. A restore lands `late_` frames after the snapshot's frame.
 class OwnedSnapshotPlayer : public RampPlayer
@@ -438,6 +564,9 @@ int main()
         TestRefusals();
         TestSeekChecks<RampPlayer>("without snapshots");
         TestSeekChecks<SnapshotRampPlayer>("with snapshots");
+        TestSetSeekChecks<RampPlayer>("without snapshots");
+        TestSetSeekChecks<SnapshotRampPlayer>("with snapshots");
+        TestSetSeekFailures();
         TestSnapshotChecks();
     };
 

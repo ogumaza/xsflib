@@ -54,8 +54,8 @@ std::string OracleText(T x)
     return std::to_string(x);
 }
 
-// Counts the cases in which the game and the model differ, and reports the first five. At its end, it checks that none
-// differed.
+// Counts the cases in which the game and the model differ, and reports the first five. At its end, it checks that there
+// was a case and that none differed.
 class Tally
 {
 public:
@@ -68,8 +68,12 @@ public:
 
     ~Tally()
     {
-        if (Check(differ_ == 0, what_ + " matches the game in all " + std::to_string(cases_) + " cases (" +
-                                    std::to_string(differ_) + " differ)"))
+        if (cases_ == 0)
+        {
+            Check(false, what_ + " compared no cases");
+        }
+        else if (Check(differ_ == 0, what_ + " matches the game in all " + std::to_string(cases_) + " cases (" +
+                                         std::to_string(differ_) + " differ)"))
         {
             std::printf("%s: all %d cases match the game\n", what_.c_str(), cases_);
         }
@@ -78,13 +82,13 @@ public:
     // A case of one value. A float matches when its bits do.
     void Compare(float game, float model, const std::string& input)
     {
-        Count(std::bit_cast<uint32_t>(game) == std::bit_cast<uint32_t>(model), OracleText(game), OracleText(model),
-              input);
+        Record(std::bit_cast<uint32_t>(game) == std::bit_cast<uint32_t>(model), OracleText(game), OracleText(model),
+               input);
     }
 
     void Compare(uint64_t game, uint64_t model, const std::string& input)
     {
-        Count(game == model, OracleText(game), OracleText(model), input);
+        Record(game == model, OracleText(game), OracleText(model), input);
     }
 
     // A case of several values. It matches when the bits of every value match.
@@ -116,6 +120,23 @@ public:
         }
     }
 
+    // A case that a test compared itself. An empty `difference` means that it matches. Returns false if it differs.
+    bool Count(const std::string& difference, const std::string& input)
+    {
+        ++cases_;
+        if (difference.empty())
+        {
+            return true;
+        }
+
+        if (differ_++ < 5)
+        {
+            std::fprintf(stderr, "%s(%s): %s\n", what_.c_str(), input.c_str(), difference.c_str());
+        }
+
+        return false;
+    }
+
     // The cases so far, and those in which the game and the model differ.
     int Cases() const
     {
@@ -128,7 +149,7 @@ public:
     }
 
 private:
-    void Count(bool same, const std::string& game, const std::string& model, const std::string& input)
+    void Record(bool same, const std::string& game, const std::string& model, const std::string& input)
     {
         ++cases_;
         if (!same && differ_++ < 5)

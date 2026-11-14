@@ -2,9 +2,9 @@
 
 // An XMPlay input plugin: a template on each format's traits. XMPlay is a 32-bit Windows program. The plugin is
 // therefore a 32-bit DLL (see xsflib_add_xmplay_plugin). XMPlay calls it through the input interface of XMPlay's plugin
-// SDK (xmpin.h): to check a file, to read its length and tags, and to open, decode and seek it. PSF tags become
-// XMPlay's tags (game as album, year as date). Length and fade come from the tags, or from the defaults on the plugin's
-// options page.
+// SDK (xmpin.h): to check a file, to read its length and tags, and to open, decode and seek it. Length and fade come
+// from the tags, or from the defaults on the plugin's options page. The text that the plugin shows of a file, its tags
+// and its info windows, comes from xsflib/xmplay/info_text.h.
 //
 // The format's player does the emulation. By default the plugin renders ahead on a worker thread and buffers the audio
 // (see xsflib/player/render_ahead.h). At the start and after a seek, playback waits until three seconds are buffered,
@@ -14,9 +14,8 @@
 // snapshots, such a seek renders from the start of the track. With rendering ahead turned off, Process renders each
 // block itself. A player with snapshots then takes them on every track.
 //
-// The options page is dialog 1000 in cmake/templates/xmplay_options.rc. It sets the length and fade of files without a
-// length tag, endless playback and rendering ahead. XMPlay stores the settings among the rest of its settings
-// (XMPFUNC_REGISTRY).
+// The options page (xsflib/xmplay/options_page.h) sets the length and fade of files without a length tag, endless
+// playback and rendering ahead.
 //
 // A format's plugin defines its traits and XMPIN_GetInterface. XMPIN_GetInterface returns Plugin<Traits>::GetInterface,
 // and the SDK's xmpin.def exports it by that name. The traits provide:
@@ -46,7 +45,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -57,9 +55,9 @@
 
 #include "xsflib/player/playback.h"
 #include "xsflib/player/render_ahead.h"
-#include "xsflib/psf/plugin_tags.h"
 #include "xsflib/psf/psf.h"
-#include "xsflib/utf8.h"
+#include "xsflib/xmplay/info_text.h"
+#include "xsflib/xmplay/options_page.h"
 
 namespace xsflib::xmplay
 {
@@ -68,27 +66,8 @@ namespace detail
 
 constexpr std::size_t kBlockFrames = 1024; // frames that Process renders or reads at a time
 
-// The size limit of the main window's format text, with its null. The SDK gives no size for XMPlay's buffer.
-constexpr std::size_t kFormatTextSize = 64;
-
 // The first XMPlay with 64-bit file sizes and seeks in XMPFUNC_FILE (GetSize64 and Seek64): 3.8.2.
 constexpr DWORD kMinXmplayVersion = 0x03080200;
-
-// The most bytes that an info window's text takes. XMPlay's buffers hold about 40,000.
-constexpr std::size_t kInfoLimit = 32000;
-
-// The options page's controls, numbered as in cmake/templates/xmplay_options.rc. XMPlay's options pages have their
-// Apply button at 1000.
-constexpr int kLengthEdit = 10;
-constexpr int kFadeEdit = 11;
-constexpr int kEndlessBox = 12;
-constexpr int kRenderAheadBox = 13;
-constexpr int kApplyButton = 1000;
-
-// The ranges of the default length and fade, in seconds.
-constexpr int kMinLength = 1;
-constexpr int kMaxLength = 24 * 3600;
-constexpr int kMaxFade = 3600;
 
 // `text` in UTF-16, for Windows' functions.
 inline std::wstring Wide(std::string_view text)
@@ -103,17 +82,6 @@ inline std::wstring Wide(std::string_view text)
     MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), size);
 
     return wide;
-}
-
-// A whole number of seconds from an options page's edit, clamped to [low, high], or `old` when the edit holds none.
-inline int SecondsFromEdit(UINT value, BOOL valid, int low, int high, int old)
-{
-    if (!valid)
-    {
-        return old;
-    }
-
-    return std::max(low, static_cast<int>(std::min<UINT>(value, static_cast<UINT>(high))));
 }
 
 } // namespace detail
@@ -140,14 +108,13 @@ public:
             misc_ = static_cast<XMPFUNC_MISC*>(faceproc(XMPFUNC_MISC_FACE));
             file_ = static_cast<XMPFUNC_FILE*>(faceproc(XMPFUNC_FILE_FACE));
             text_ = static_cast<XMPFUNC_TEXT*>(faceproc(XMPFUNC_TEXT_FACE));
-            registry_ = static_cast<XMPFUNC_REGISTRY*>(faceproc(XMPFUNC_REGISTRY_FACE));
             if (in_ == nullptr || misc_ == nullptr || file_ == nullptr || text_ == nullptr ||
                 misc_->GetVersion() < detail::kMinXmplayVersion)
             {
                 return nullptr;
             }
 
-            LoadSettings();
+            Page::Load(static_cast<XMPFUNC_REGISTRY*>(faceproc(XMPFUNC_REGISTRY_FACE)));
 
             static const std::string kExtensionList = Extensions();
             static XMPIN plugin = Interface(kExtensionList.c_str());
@@ -163,15 +130,8 @@ private:
     using Player = typename Traits::Player;
     using Playback = player::Playback<Player>;
     using Options = player::PlaybackOptions<Player>;
-
-    // The settings on the options page.
-    struct Settings
-    {
-        int default_length_s = static_cast<int>(Options::kDefaultLengthMs / 1000);
-        int default_fade_s = static_cast<int>(Options::kDefaultFadeMs / 1000);
-        bool endless = false;
-        bool render_ahead = true;
-    };
+    using Page = OptionsPage<Traits>;
+    using Settings = typename Page::Settings;
 
     // Closes an XMPFILE that the plugin opened.
     struct FileCloser
@@ -184,23 +144,11 @@ private:
 
     using OpenedFile = std::unique_ptr<void, FileCloser>;
 
-    // The settings' keys in XMPlay's settings, in the section that Section() names.
-    static constexpr const char* kLengthKey = "Default length";
-    static constexpr const char* kFadeKey = "Default fade";
-    static constexpr const char* kEndlessKey = "Endless";
-    static constexpr const char* kRenderAheadKey = "Render ahead";
-
     // Windows paths never hold '|'. With it among the separators, a set in an archive whose files' paths read
     // archive|file finds its libraries in the archive.
     static constexpr std::string_view kSeparators = "/\\|";
 
     static constexpr float kSampleScale = 1.0f / 32768.0f; // 16-bit samples to XMPlay's floats
-
-    // Whether XMPlay leaves the tag `name` out: a PSF tag that isn't metadata, or one of the format's playback tags.
-    static bool IsHiddenTag(std::string_view name)
-    {
-        return psf::IsHiddenTag(name, Traits::kPlaybackTags);
-    }
 
     // The interface that GetInterface gives XMPlay.
     static XMPIN Interface(const char* extensions)
@@ -221,7 +169,7 @@ private:
         plugin.GetMessage = MessageInfo;
         plugin.SetPosition = SetPosition;
         plugin.Process = Process;
-        plugin.Options = OptionsPage;
+        plugin.Options = Page::Handle;
 
         return plugin;
     }
@@ -288,7 +236,7 @@ private:
                 return 0;
             }
 
-            const float seconds = Seconds(LengthOf(psf.tags, CurrentSettings()));
+            const float seconds = Seconds(LengthOf(psf.tags, Page::Current()));
             const std::string block = TagBlock(psf.tags);
             if (length != nullptr)
             {
@@ -303,7 +251,7 @@ private:
 
             if (tags != nullptr)
             {
-                *tags = Copy(block);
+                *tags = detail::CopyForXmplay(block, misc_);
             }
 
             return 1;
@@ -356,7 +304,7 @@ private:
                 return 0;
             }
 
-            const Settings settings = CurrentSettings();
+            const Settings settings = Page::Current();
             auto playback = std::make_unique<Playback>();
             if (!playback->Open(std::move(set), OptionsFrom(settings)) || !playback->Start())
             {
@@ -435,7 +383,7 @@ private:
         try
         {
             std::lock_guard lock(track_mutex_);
-            return open_ ? Copy(TagBlock(tags_)) : nullptr;
+            return open_ ? detail::CopyForXmplay(TagBlock(tags_), misc_) : nullptr;
         }
         catch (...)
         {
@@ -448,7 +396,7 @@ private:
     {
         if (format != nullptr)
         {
-            std::snprintf(format, detail::kFormatTextSize, "%s - %d Hz", Traits::kName, SampleRate());
+            detail::WriteFormatText(format, Traits::kName, SampleRate());
         }
     }
 
@@ -462,23 +410,12 @@ private:
 
         try
         {
-            std::string text = "Format\t" + std::string(Traits::kName) + "\r";
-            text += "Sample rate\t" + std::to_string(SampleRate()) + " Hz\r";
-            text += "Channels\t2\rResolution\t16 bit\r";
+            std::string text;
             {
                 std::lock_guard lock(track_mutex_);
-                if (open_)
-                {
-                    text += "Length\t" + psf::FormatTime(length_.play_ms) + "\r";
-                    text += "Fade\t" + psf::FormatTime(length_.fade_ms) + "\r";
-                    if (const auto it = tags_.find("volume"); it != tags_.end())
-                    {
-                        text += "Volume\t" + it->second + "\r";
-                    }
-                }
+                text = detail::GeneralInfoText(Traits::kName, SampleRate(), open_ ? &tags_ : nullptr, length_);
             }
 
-            text.resize(std::min(text.size(), detail::kInfoLimit - 1));
             std::memcpy(buffer, text.c_str(), text.size() + 1);
         }
         catch (...)
@@ -499,29 +436,9 @@ private:
         try
         {
             std::lock_guard lock(track_mutex_);
-            if (!open_)
+            if (open_)
             {
-                return;
-            }
-
-            const bool utf8 = tags_.count("utf8") != 0;
-            char* end = buffer;
-            for (const auto& [name, value] : tags_)
-            {
-                if (IsHiddenTag(name))
-                {
-                    continue;
-                }
-
-                // FormatInfoText may write each line break as two characters.
-                const std::string text = NativeText(value, utf8);
-                const std::size_t most = name.size() + 2 * text.size() + 4;
-                if (static_cast<std::size_t>(end - buffer) + most >= detail::kInfoLimit)
-                {
-                    break;
-                }
-
-                end = misc_->FormatInfoText(end, name.c_str(), text.c_str());
+                detail::WriteMessageInfo(buffer, tags_, Traits::kPlaybackTags, text_, misc_);
             }
         }
         catch (...)
@@ -598,47 +515,6 @@ private:
         }
     }
 
-    // The options page's handler. XMPlay shows the page in its options window.
-    static INT_PTR CALLBACK OptionsPage(HWND page, UINT message, WPARAM wparam, LPARAM /*lparam*/)
-    {
-        try
-        {
-            if (message == WM_INITDIALOG)
-            {
-                ShowSettings(page, CurrentSettings());
-                return TRUE;
-            }
-
-            if (message != WM_COMMAND)
-            {
-                return FALSE;
-            }
-
-            const int control = LOWORD(wparam);
-            const int notification = HIWORD(wparam);
-            if (control == detail::kApplyButton && notification == BN_CLICKED)
-            {
-                ApplySettings(page);
-                return TRUE;
-            }
-
-            const bool edited =
-                (control == detail::kLengthEdit || control == detail::kFadeEdit) && notification == EN_CHANGE;
-            const bool clicked =
-                (control == detail::kEndlessBox || control == detail::kRenderAheadBox) && notification == BN_CLICKED;
-            if (edited || clicked)
-            {
-                EnableWindow(GetDlgItem(page, detail::kApplyButton), TRUE);
-                return TRUE;
-            }
-        }
-        catch (...)
-        {
-        }
-
-        return FALSE;
-    }
-
     static void CloseTrack()
     {
         ahead_.reset();
@@ -696,62 +572,10 @@ private:
         return ReadWhole(file, data) && !psf::ParsePsf(data, psf, false) && psf.version == Traits::kPsfVersion;
     }
 
-    // A tag's value in XMPlay's text, which is UTF-8. PSF tags are UTF-8 when the file has a utf8 tag. Without one,
-    // text that isn't valid UTF-8 is read in the system's code page.
-    static std::string NativeText(const std::string& value, bool utf8)
-    {
-        if (utf8 || IsUtf8(value))
-        {
-            return value;
-        }
-
-        char* converted = text_->Ansi(value.data(), static_cast<int>(value.size()));
-        if (converted == nullptr)
-        {
-            return {};
-        }
-
-        std::string text = converted;
-        misc_->Free(converted);
-
-        return text;
-    }
-
-    // XMPlay's tags for `tags`: the filetype tag, then the metadata, as names and values that each end with '\0'.
-    // Copy() adds the final '\0'.
+    // XMPlay's tags for `tags` (detail::TagBlock).
     static std::string TagBlock(const psf::Tags& tags)
     {
-        const bool utf8 = tags.count("utf8") != 0;
-        std::string block = "filetype";
-        block += '\0';
-        block += Traits::kName;
-        block += '\0';
-        for (const auto& [name, value] : tags)
-        {
-            if (IsHiddenTag(name) || name == "filetype")
-            {
-                continue;
-            }
-
-            block += psf::FieldFromTag(name);
-            block += '\0';
-            block += NativeText(value, utf8);
-            block += '\0';
-        }
-
-        return block;
-    }
-
-    // `text` and a final '\0' in memory from XMPlay's Alloc, or nullptr when Alloc fails.
-    static char* Copy(const std::string& text)
-    {
-        auto* copy = static_cast<char*>(misc_->Alloc(static_cast<DWORD>(text.size() + 1)));
-        if (copy != nullptr)
-        {
-            std::memcpy(copy, text.c_str(), text.size() + 1);
-        }
-
-        return copy;
+        return detail::TagBlock(tags, Traits::kName, Traits::kPlaybackTags, text_, misc_);
     }
 
     // The length and fade of a file with `tags`: from its length and fade tags, or the defaults.
@@ -776,111 +600,11 @@ private:
         return options;
     }
 
-    static Settings CurrentSettings()
-    {
-        std::lock_guard lock(settings_mutex_);
-        return settings_;
-    }
-
-    // The section of XMPlay's settings that holds the plugin's.
-    static std::string Section()
-    {
-        return std::string(Traits::kName) + " plugin";
-    }
-
-    // Reads the settings from XMPlay's settings. A setting that XMPlay doesn't hold keeps its default.
-    static void LoadSettings()
-    {
-        Settings settings;
-        if (registry_ != nullptr)
-        {
-            const std::string section = Section();
-            int value = 0;
-            if (registry_->GetInt(section.c_str(), kLengthKey, &value))
-            {
-                settings.default_length_s = std::clamp(value, detail::kMinLength, detail::kMaxLength);
-            }
-
-            if (registry_->GetInt(section.c_str(), kFadeKey, &value))
-            {
-                settings.default_fade_s = std::clamp(value, 0, detail::kMaxFade);
-            }
-
-            if (registry_->GetInt(section.c_str(), kEndlessKey, &value))
-            {
-                settings.endless = value != 0;
-            }
-
-            if (registry_->GetInt(section.c_str(), kRenderAheadKey, &value))
-            {
-                settings.render_ahead = value != 0;
-            }
-        }
-
-        std::lock_guard lock(settings_mutex_);
-        settings_ = settings;
-    }
-
-    static void SaveSettings(const Settings& settings)
-    {
-        if (registry_ == nullptr)
-        {
-            return;
-        }
-
-        const std::string section = Section();
-        const int endless = settings.endless ? 1 : 0;
-        const int render_ahead = settings.render_ahead ? 1 : 0;
-        registry_->SetInt(section.c_str(), kLengthKey, &settings.default_length_s);
-        registry_->SetInt(section.c_str(), kFadeKey, &settings.default_fade_s);
-        registry_->SetInt(section.c_str(), kEndlessKey, &endless);
-        registry_->SetInt(section.c_str(), kRenderAheadKey, &render_ahead);
-    }
-
-    // Shows `settings` on the options page. Nothing is left to apply.
-    static void ShowSettings(HWND page, const Settings& settings)
-    {
-        SetDlgItemInt(page, detail::kLengthEdit, static_cast<UINT>(settings.default_length_s), FALSE);
-        SetDlgItemInt(page, detail::kFadeEdit, static_cast<UINT>(settings.default_fade_s), FALSE);
-        CheckDlgButton(page, detail::kEndlessBox, settings.endless ? BST_CHECKED : BST_UNCHECKED);
-        CheckDlgButton(page, detail::kRenderAheadBox, settings.render_ahead ? BST_CHECKED : BST_UNCHECKED);
-
-        // Setting the edits' text enabled the Apply button.
-        EnableWindow(GetDlgItem(page, detail::kApplyButton), FALSE);
-    }
-
-    // Takes the settings from the options page, keeps them in XMPlay's settings, and shows them as they apply. The next
-    // file that XMPlay opens plays with them.
-    static void ApplySettings(HWND page)
-    {
-        Settings settings = CurrentSettings();
-        BOOL valid = FALSE;
-        UINT value = GetDlgItemInt(page, detail::kLengthEdit, &valid, FALSE);
-        settings.default_length_s =
-            detail::SecondsFromEdit(value, valid, detail::kMinLength, detail::kMaxLength, settings.default_length_s);
-        value = GetDlgItemInt(page, detail::kFadeEdit, &valid, FALSE);
-        settings.default_fade_s = detail::SecondsFromEdit(value, valid, 0, detail::kMaxFade, settings.default_fade_s);
-        settings.endless = IsDlgButtonChecked(page, detail::kEndlessBox) == BST_CHECKED;
-        settings.render_ahead = IsDlgButtonChecked(page, detail::kRenderAheadBox) == BST_CHECKED;
-
-        {
-            std::lock_guard lock(settings_mutex_);
-            settings_ = settings;
-        }
-
-        SaveSettings(settings);
-        ShowSettings(page, settings);
-    }
-
     // XMPlay's functions, from GetInterface.
     inline static XMPFUNC_IN* in_ = nullptr;
     inline static XMPFUNC_MISC* misc_ = nullptr;
     inline static XMPFUNC_FILE* file_ = nullptr;
     inline static XMPFUNC_TEXT* text_ = nullptr;
-    inline static XMPFUNC_REGISTRY* registry_ = nullptr; // without it, the settings aren't kept
-
-    inline static std::mutex settings_mutex_;
-    inline static Settings settings_; // guarded by settings_mutex_
 
     // The open track's playback, which XMPlay's decoding thread uses.
     inline static std::unique_ptr<Playback> playback_;         // when Process renders the blocks itself

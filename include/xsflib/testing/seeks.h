@@ -140,6 +140,71 @@ void CheckRenderAhead(std::unique_ptr<player::Playback<Player>> playback, const 
                  static_cast<unsigned long long>(kept.end));
 }
 
+namespace detail
+{
+
+// The whole output of an uninterrupted render of a set: a Playback with `options` but no snapshots, opened from
+// `source` (see CheckSeekingOfSet). The playback has to start. Unless `require_sound` is false, it also has to render
+// something and end without an error. `what` names the case in the failures.
+template <typename Player, typename... Source>
+std::vector<int16_t> ReferenceRender(const player::PlaybackOptions<Player>& options, bool require_sound,
+                                     const std::string& what, const Source&... source)
+{
+    player::PlaybackOptions<Player> straight = options;
+    straight.snapshots = false;
+    player::Playback<Player> reference;
+    Check(reference.Open(source..., straight) && reference.Start(), what + ": the reference starts");
+    const std::vector<int16_t> expected =
+        RenderFrames([&reference](int16_t* out, std::size_t frames) { return reference.Render(out, frames); });
+    if (require_sound)
+    {
+        Check(!expected.empty() && reference.GetPlayer().GetState() != Player::State::kError,
+              what + ": the reference renders");
+    }
+
+    return expected;
+}
+
+} // namespace detail
+
+// Checks the seeks of a Playback of a set with `options` against an uninterrupted render of the same set without
+// snapshots (CheckSeeking). `source` is what Playback::Open takes before the options: a path and a reader, or a set.
+// The reference has to start, render something and end without an error, and the playback has to start. `what` names
+// the case in the failures.
+template <typename Player, typename... Source>
+void CheckSeekingOfSet(const player::PlaybackOptions<Player>& options, const std::string& what, const Source&... source)
+{
+    const std::vector<int16_t> expected = detail::ReferenceRender(options, true, what, source...);
+
+    player::Playback<Player> playback;
+    if (!playback.Open(source..., options) || !playback.Start())
+    {
+        Check(false, what + ": playback starts (" + playback.Error() + ")");
+        return;
+    }
+
+    CheckSeeking(playback, expected, what);
+}
+
+// Checks rendering ahead of a Playback of a set with `options`, with a buffer of at most `keep` frames, against an
+// uninterrupted render of the same set without snapshots (CheckRenderAhead). `source` is what Playback::Open takes
+// before the options. The reference and the playback have to start. `what` names the case in the failures.
+template <typename Player, typename... Source>
+void CheckRenderAheadOfSet(const player::PlaybackOptions<Player>& options, uint64_t keep, const std::string& what,
+                           const Source&... source)
+{
+    const std::vector<int16_t> expected = detail::ReferenceRender(options, false, what, source...);
+
+    auto playback = std::make_unique<player::Playback<Player>>();
+    if (!playback->Open(source..., options) || !playback->Start())
+    {
+        Check(false, what + ": playback starts (" + playback->Error() + ")");
+        return;
+    }
+
+    CheckRenderAhead(std::move(playback), expected, keep, what);
+}
+
 // Checks the snapshots of `player` against `reference`, two players that have just started the same track. `reference`
 // renders `frames` frames without a break. `player` renders them too. It takes a snapshot at 30 % of them and one at
 // 60 %, the second on top of the first. Taking them mustn't change the output. Restoring each has to give the output

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// Tests of the byte loads and stores and of Reader, on bytes built here.
+// Tests of the byte loads, stores and appends and of Reader, on bytes built here.
 
 #include "xsflib/binary.h"
 
@@ -54,6 +54,31 @@ void TestLoadsAndStores()
 
     XSFLIB_CHECK(ByteSwap16(0x1234) == 0x3412);
     XSFLIB_CHECK(ByteSwap32(0x12345678) == 0x78563412);
+}
+
+// The appends add the value's bytes, low byte first, after the bytes already in the vector. The appends write the same
+// bytes as StoreLe16 and StoreLe32.
+void TestAppends()
+{
+    std::vector<uint8_t> out = {0xaa};
+
+    AppendLe16(out, 0x1234);
+    AppendLe32(out, 0x89abcdef);
+    AppendLe16(out, 0xffff);
+    AppendLe32(out, 0);
+
+    XSFLIB_CHECK(out == std::vector<uint8_t>({0xaa, 0x34, 0x12, 0xef, 0xcd, 0xab, 0x89, 0xff, 0xff, 0, 0, 0, 0}));
+    XSFLIB_CHECK(LoadLe16(out.data() + 1) == 0x1234 && LoadLe32(out.data() + 3) == 0x89abcdef);
+
+    uint8_t stored[6] = {};
+    StoreLe16(stored, 0xbeef);
+    StoreLe32(stored + 2, 0xfedcba98);
+
+    std::vector<uint8_t> appended;
+    AppendLe16(appended, 0xbeef);
+    AppendLe32(appended, 0xfedcba98);
+
+    XSFLIB_CHECK(appended == std::vector<uint8_t>(stored, stored + 6));
 }
 
 // The same bytes read in each byte order, signed values and floats included.
@@ -134,6 +159,7 @@ int main()
     const auto tests = []
     {
         TestLoadsAndStores();
+        TestAppends();
         TestByteOrders();
         TestBounds();
         TestStringsAndMagic();

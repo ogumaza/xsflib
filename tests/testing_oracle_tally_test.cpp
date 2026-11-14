@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 // Checks the helpers of the oracle tests (xsflib/testing/oracle_tally.h): the text of a value, the tally of the cases
-// in which a game and a model differ, and the generator of inputs. A tally passes when every case matches, and fails
-// once at its end otherwise. The failing tallies report a few cases to stderr.
+// in which a game and a model differ, and the generator of inputs. A tally passes when it has a case and every case
+// matches, and fails once at its end otherwise. The failing tallies report a few cases to stderr.
 
 #include <cmath>
 #include <cstdint>
@@ -87,6 +87,46 @@ void TestIntegersAndLists()
     XSFLIB_CHECK(lists.failures == 1 && differ == 2);
 }
 
+// A case that the test compared itself counts as one case. An empty difference matches.
+void TestCount()
+{
+    std::optional<int> cases;
+    std::optional<int> differ;
+    std::optional<bool> first;
+    std::optional<bool> second;
+    const Captured same = Capture(
+        [&]
+        {
+            Tally tally("same counts");
+            first = tally.Count("", "a");
+            second = tally.Count("", "b");
+            cases = tally.Cases();
+            differ = tally.Differ();
+        });
+    XSFLIB_CHECK(same.failures == 0 && first == true && second == true && cases == 2 && differ == 0);
+
+    const Captured mixed = Capture(
+        [&]
+        {
+            Tally tally("mixed counts");
+            first = tally.Count("the game gives 1, the model 2", "a");
+            second = tally.Count("", "b");
+            tally.Compare(uint64_t{3}, uint64_t{4}, "c");
+            cases = tally.Cases();
+            differ = tally.Differ();
+        });
+    XSFLIB_CHECK(mixed.failures == 1 && first == false && second == true && cases == 3 && differ == 2);
+    XSFLIB_CHECK(mixed.text.find("mixed counts matches the game in all 3 cases (2 differ)") != std::string::npos);
+}
+
+// A tally with no cases fails: the test compared nothing.
+void TestEmpty()
+{
+    const Captured empty = Capture([] { const Tally tally("nothing"); });
+    XSFLIB_CHECK(empty.failures == 1);
+    XSFLIB_CHECK(empty.text.find("nothing compared no cases") != std::string::npos);
+}
+
 // The generator gives the same numbers on every run, each below its bound.
 void TestInputs()
 {
@@ -119,6 +159,8 @@ int main()
         TestText();
         TestFloats();
         TestIntegersAndLists();
+        TestCount();
+        TestEmpty();
         TestInputs();
     };
 

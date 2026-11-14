@@ -37,6 +37,15 @@ function(xsflib_make_global target)
     endif()
 endfunction()
 
+# Downloads and adds a project whose tests follow BUILD_TESTING, with its tests off. BUILD_TESTING is a normal variable
+# here, and only for the scope of the function. The cache keeps the value that the project using xsflib set. A forced
+# cache entry would turn off that project's tests too: include(CTest) keeps a BUILD_TESTING that is already in the
+# cache. FetchContent_GetProperties(<name>) gives the caller the folders of the project.
+function(xsflib_fetch_without_tests name)
+    set(BUILD_TESTING OFF)
+    FetchContent_MakeAvailable(${name})
+endfunction()
+
 # zlib.
 if (XSFLIB_PSF OR XSFLIB_DISC_LIBRARIES OR XSFLIB_ZLIB)
     if (NOT TARGET ZLIB::ZLIB)
@@ -113,11 +122,11 @@ if (XSFLIB_DISC_LIBRARIES)
             GIT_REPOSITORY https://github.com/tukaani-project/xz.git
             GIT_TAG v5.8.4
             GIT_SHALLOW TRUE)
-        foreach (option XZ_TOOL_XZ XZ_TOOL_XZDEC XZ_TOOL_LZMADEC XZ_TOOL_LZMAINFO XZ_TOOL_SCRIPTS XZ_DOC XZ_NLS
-                        BUILD_TESTING)
+        foreach (option XZ_TOOL_XZ XZ_TOOL_XZDEC XZ_TOOL_LZMADEC XZ_TOOL_LZMAINFO XZ_TOOL_SCRIPTS XZ_DOC XZ_NLS)
             set(${option} OFF CACHE BOOL "" FORCE)
         endforeach()
-        FetchContent_MakeAvailable(xz)
+        xsflib_fetch_without_tests(xz)
+        FetchContent_GetProperties(xz)
         set_property(DIRECTORY ${xz_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
         # xz turns on /W4 for clang-cl. liblzma is built without warnings, as libFLAC is.
         if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -192,11 +201,12 @@ if (XSFLIB_CLI)
             GIT_REPOSITORY https://github.com/xiph/flac.git
             GIT_TAG 1.5.0
             GIT_SHALLOW TRUE)
-        foreach (option BUILD_CXXLIBS BUILD_PROGRAMS BUILD_EXAMPLES BUILD_TESTING BUILD_DOCS INSTALL_MANPAGES
+        foreach (option BUILD_CXXLIBS BUILD_PROGRAMS BUILD_EXAMPLES BUILD_DOCS INSTALL_MANPAGES
                         INSTALL_PKGCONFIG_MODULES INSTALL_CMAKE_CONFIG_MODULE WITH_OGG)
             set(${option} OFF CACHE BOOL "" FORCE)
         endforeach()
-        FetchContent_MakeAvailable(flac)
+        xsflib_fetch_without_tests(flac)
+        FetchContent_GetProperties(flac)
         # Build only libFLAC: the helper libraries of flac's programs would be built by default too.
         set_property(DIRECTORY ${flac_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL TRUE)
         # flac turns on -Wall for Clang. clang-cl takes that as -Weverything. libFLAC is then built without warnings.
