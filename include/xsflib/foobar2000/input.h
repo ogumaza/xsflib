@@ -563,7 +563,13 @@ private:
     std::unique_ptr<Playback> playback_;         // when decode_run renders the blocks itself
     std::unique_ptr<player::RenderAhead> ahead_; // owns the Playback while rendering ahead
     std::vector<int16_t> buffer_;
+
+    // The MSVC ABI, which clang-cl follows, ignores [[no_unique_address]] and uses [[msvc::no_unique_address]].
+#if defined(_MSC_VER)
+    [[msvc::no_unique_address]] std::conditional_t<Playback::kSampleRate == 0, SetRate, NoSetRate> set_rate_;
+#else
     [[no_unique_address]] std::conditional_t<Playback::kSampleRate == 0, SetRate, NoSetRate> set_rate_;
+#endif
 };
 
 } // namespace xsflib::foobar2000
